@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"database/sql"
 	"io/fs"
 	"log"
 	"os"
@@ -32,7 +33,7 @@ func main() {
 	// Load provider from DB, seed defaults on first run
 	provSvc := &provider.Service{DB: database}
 	if ps, _ := provSvc.List(); len(ps) == 0 {
-		seedDefaults(provSvc)
+		seedDefaults(provSvc, database)
 	}
 	var prov llm.Provider
 	var model string
@@ -61,7 +62,7 @@ func main() {
 	log.Fatal(server.ListenAndServe(cfg.Port, srv.Handler()))
 }
 
-func seedDefaults(svc *provider.Service) {
+func seedDefaults(svc *provider.Service, database *sql.DB) {
 	key := "63b282b9-2952-4c88-84e4-91a1eb91c007"
 	if v := os.Getenv("AIOPE_GATEWAY_KEY"); v != "" {
 		key = v
@@ -98,5 +99,11 @@ func seedDefaults(svc *provider.Service) {
 	}
 	svc.Create(p)
 	svc.SetActive(p.ID)
+
+	// Seed task model defaults
+	for task, model := range llm.TaskModelDefaults {
+		database.Exec("INSERT OR IGNORE INTO settings_kv(key,value) VALUES(?,?)", "task_model_"+task, model)
+	}
+
 	log.Println("Seeded default AIOPE Gateway provider")
 }

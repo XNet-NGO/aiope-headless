@@ -2,6 +2,7 @@ package llm
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -134,6 +135,16 @@ var BuiltinTools = []ToolDef{
 		},
 	},
 	{
+		Name: "image_generate", Description: "Generate an image from a text prompt. Returns a URL to the generated image. Include the URL in your response as ![description](url) to display it.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"prompt": map[string]any{"type": "string", "description": "Detailed image generation prompt"},
+			},
+			"required": []string{"prompt"},
+		},
+	},
+	{
 		Name: "ssh_start", Description: "Open persistent SSH session to a remote server. Resolves from ~/.ssh/config or connects by hostname. Returns connection status.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -168,9 +179,31 @@ var BuiltinTools = []ToolDef{
 }
 
 type ToolContext struct {
-	DB         *sql.DB // for memory tools
-	GatewayURL string  // e.g. "https://inf.xnet.ngo"
+	DB         *sql.DB
+	GatewayURL string
 	GatewayKey string
+}
+
+// Task model resolution — different models for different tasks
+var TaskModelDefaults = map[string]string{
+	"title":     "google-ai-studio/models-gemma-3-1b-it",
+	"summary":   "google-ai-studio/models-gemma-3-27b-it",
+	"image_gen": "pollinations-pollen/klein",
+	"subagent":  "google-ai-studio/models-gemma-4-26b-a4b-it",
+}
+
+func (ctx *ToolContext) ResolveTaskModel(task string) (string, string) {
+	// Check settings_kv for override: task_model_{task} = "model_id"
+	if ctx.DB != nil {
+		var model string
+		if err := ctx.DB.QueryRow("SELECT value FROM settings_kv WHERE key=?", "task_model_"+task).Scan(&model); err == nil && model != "" {
+			return ctx.GatewayURL, model
+		}
+	}
+	if m, ok := TaskModelDefaults[task]; ok {
+		return ctx.GatewayURL, m
+	}
+	return ctx.GatewayURL, ""
 }
 
 func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, error) {
@@ -297,6 +330,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		ctx.DB.Exec("DELETE FROM memories WHERE key=?", key)
 		return "Deleted memory: " + key, nil
 
+	case "image_generate":
+		return generateImage(ctx, str("prompt"))
+
 	case "ssh_start":
 		server := str("server")
 		client, err := sshConnect(server)
@@ -347,4 +383,49 @@ func queryGateway(ctx *ToolContext, category, extra string) (string, error) {
 		return "", fmt.Errorf("gateway %d: %s", resp.StatusCode, string(data))
 	}
 	return string(data), nil
+}
+
+func generateImage(ctx *ToolContext, prompt string) (string, error) {
+	if prompt == "" {
+		return "", fmt.Errorf("prompt required")
+	}
+	_, model := ctx.ResolveTaskModel("image_gen")
+	if model == "" {
+		model = "pollinations-pollen/klein"
+	}
+	base := strings.TrimRight(ctx.GatewayURL, "/")
+	base = strings.TrimSuffix(base, "/chat/completions")
+	base = strings.TrimSuffix(base, "/v1")
+
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","response_format":"url","seed":%d}`,
+		model, strings.ReplaceAll(prompt, `"`, `\"`), time.Now().UnixMilli())
+
+	req, _ := http.NewRequest("POST", base+"/v1/images/generations", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if ctx.GatewayKey != "" {
+		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
+	}
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("image gen %d: %s", resp.StatusCode, string(data))
+	}
+
+	var result struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	json.Unmarshal(data, &result)
+	if len(result.Data) > 0 && result.Data[0].URL != "" {
+		return fmt.Sprintf("Image generated!\n![generated image](%s)", result.Data[0].URL), nil
+	}
+	return "", fmt.Errorf("no image in response: %s", string(data)[:200])
 }

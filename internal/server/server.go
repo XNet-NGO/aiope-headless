@@ -313,9 +313,21 @@ func (s *Server) autoTitle(convID, userMsg string) {
 	}
 	var title strings.Builder
 	s.mu.RLock()
-	model := s.Model
 	prov := s.Provider
 	s.mu.RUnlock()
+
+	// Use title task model if available
+	toolCtx := &llm.ToolContext{DB: s.DB}
+	if active := s.Providers.GetActive(); active != nil {
+		toolCtx.GatewayURL = active.APIBase
+		toolCtx.GatewayKey = active.APIKey
+	}
+	_, model := toolCtx.ResolveTaskModel("title")
+	if model == "" {
+		s.mu.RLock()
+		model = s.Model
+		s.mu.RUnlock()
+	}
 	if model == "" {
 		model = "gpt-4o"
 	}
