@@ -223,29 +223,58 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
 	}
 
-	// Stream response
+	// Determine tools (PLAN mode = no write tools)
+	tools := llm.BuiltinTools
+	if mode == "plan" {
+		var readOnly []llm.ToolDef
+		for _, t := range tools {
+			if t.Name != "run_sh" && t.Name != "write_file" {
+				readOnly = append(readOnly, t)
+			}
+		}
+		tools = readOnly
+	}
+
+	// Stream response via orchestrator
 	assistantID := uuid.NewString()
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
-	var fullContent strings.Builder
 	s.mu.RLock()
-	model := s.Model
 	prov := s.Provider
+	model := s.Model
 	s.mu.RUnlock()
 	if model == "" {
 		model = "gpt-4o"
 	}
 
-	err = prov.Stream(chatMsgs, model, func(ev llm.StreamEvent) {
-		if ev.Delta != "" {
-			fullContent.WriteString(ev.Delta)
-			s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
-		}
-		if ev.Done {
-			s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": convID, "messageId": assistantID, "finishReason": ev.FinishReason})
-		}
-	})
+	orch := &llm.Orchestrator{
+		Provider: prov,
+		Model:    model,
+		Tools:    tools,
+		OnEvent: func(ev llm.StreamEvent) {
+			if ev.Delta != "" {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
+			}
+			if ev.Reasoning != "" {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.reasoning", "conversationId": convID, "messageId": assistantID, "delta": ev.Reasoning})
+			}
+			if len(ev.ToolCalls) > 0 {
+				for _, tc := range ev.ToolCalls {
+					s.Hub.BroadcastJSON(map[string]any{"type": "stream.tool_call", "conversationId": convID, "messageId": assistantID, "toolCall": tc})
+				}
+			}
+			if len(ev.ToolResults) > 0 {
+				for _, tr := range ev.ToolResults {
+					s.Hub.BroadcastJSON(map[string]any{"type": "stream.tool_result", "conversationId": convID, "toolCallId": tr.ID, "name": tr.Name, "result": tr.Result, "isError": tr.IsErr})
+				}
+			}
+			if ev.Done {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": convID, "messageId": assistantID, "finishReason": ev.FinishReason})
+			}
+		},
+	}
 
+	fullContent, err := orch.Run(chatMsgs)
 	if err != nil {
 		log.Printf("LLM error: %v", err)
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
@@ -253,9 +282,11 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	}
 
 	// Save assistant message
-	aMsg, _ := s.Messages.Add(convID, "assistant", fullContent.String())
-	if aMsg != nil {
-		s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
+	if fullContent != "" {
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		if aMsg != nil {
+			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
+		}
 	}
 	s.Conversations.Touch(convID)
 
@@ -271,11 +302,14 @@ func (s *Server) autoTitle(convID, userMsg string) {
 		{Role: "user", Content: userMsg},
 	}
 	var title strings.Builder
+	s.mu.RLock()
 	model := s.Model
+	prov := s.Provider
+	s.mu.RUnlock()
 	if model == "" {
 		model = "gpt-4o"
 	}
-	s.Provider.Stream(prompt, model, func(ev llm.StreamEvent) {
+	prov.Stream(prompt, model, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			title.WriteString(ev.Delta)
 		}
