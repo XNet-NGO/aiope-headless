@@ -12,6 +12,7 @@ type Orchestrator struct {
 	Provider Provider
 	Model    string
 	Tools    []ToolDef
+	ToolCtx  *ToolContext
 	OnEvent  func(StreamEvent)
 }
 
@@ -82,7 +83,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		raw = append(raw, ChatMessage{Role: "assistant", ToolCalls: tcJSON})
 
 		// Execute tools (parallel if all safe, else sequential)
-		results := executeCalls(toolCalls)
+		results := executeCalls(toolCalls, o.ToolCtx)
 
 		// Emit results to client
 		o.OnEvent(StreamEvent{ToolResults: results})
@@ -107,7 +108,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 	return fullContent.String(), nil
 }
 
-func executeCalls(calls []ToolCallInfo) []ToolResultInfo {
+func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
 	allSafe := true
 	for _, c := range calls {
 		if !ParallelSafe[c.Name] {
@@ -123,7 +124,7 @@ func executeCalls(calls []ToolCallInfo) []ToolResultInfo {
 			wg.Add(1)
 			go func(i int, c ToolCallInfo) {
 				defer wg.Done()
-				out, err := ExecuteTool(c.Name, c.Arguments)
+				out, err := ExecuteTool(c.Name, c.Arguments, ctx)
 				r := ToolResultInfo{ID: c.ID, Name: c.Name, Result: out}
 				if err != nil {
 					r.Result = "Error: " + err.Error()
@@ -138,7 +139,7 @@ func executeCalls(calls []ToolCallInfo) []ToolResultInfo {
 
 	results := make([]ToolResultInfo, len(calls))
 	for i, c := range calls {
-		out, err := ExecuteTool(c.Name, c.Arguments)
+		out, err := ExecuteTool(c.Name, c.Arguments, ctx)
 		r := ToolResultInfo{ID: c.ID, Name: c.Name, Result: out}
 		if err != nil {
 			r.Result = "Error: " + err.Error()

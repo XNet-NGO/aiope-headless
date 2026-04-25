@@ -55,6 +55,7 @@ func main() {
 		Provider:      prov,
 		Model:         model,
 		WebFS:         webFS,
+		DB:            database,
 	}
 
 	log.Fatal(server.ListenAndServe(cfg.Port, srv.Handler()))

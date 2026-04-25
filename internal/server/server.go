@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -30,6 +31,7 @@ type Server struct {
 	Provider      llm.Provider
 	Model         string
 	WebFS         fs.FS
+	DB            *sql.DB
 	mu            sync.RWMutex
 }
 
@@ -247,10 +249,18 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		model = "gpt-4o"
 	}
 
+	// Get gateway info for search/query tools
+	var gwURL, gwKey string
+	if active := s.Providers.GetActive(); active != nil {
+		gwURL = active.APIBase
+		gwKey = active.APIKey
+	}
+
 	orch := &llm.Orchestrator{
 		Provider: prov,
 		Model:    model,
 		Tools:    tools,
+		ToolCtx:  &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {
 				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})

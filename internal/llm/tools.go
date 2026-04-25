@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
+	"search_web": true, "search_images": true, "query_data": true,
+	"memory_recall": true,
 }
 
 var BuiltinTools = []ToolDef{
@@ -67,9 +70,78 @@ var BuiltinTools = []ToolDef{
 			"required": []string{"url"},
 		},
 	},
+	{
+		Name: "search_web", Description: "Search the web for current information, news, answers, or any topic. Returns results with titles, URLs, and snippets.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "Search query"},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		Name: "search_images", Description: "Search for images on the web. Returns image URLs with titles.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "Image search query"},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		Name: "query_data", Description: "Query live real-time data from the AIOPE Gateway. Returns JSON. Available categories: air_quality, alerts, apod, asteroids, astronauts, cat, cat_breed, cat_breeds, cme, earth_events, earth_image, earthquakes, earthquakes_significant, epic, fires, geomagnetic, impact_risk, ip_location, iss, nasa_media, nasa_tech, ocean_temp, solar, solar_flares, sunrise_sunset, tides, time, uv, weather, weather_hourly",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"category": map[string]any{"type": "string", "description": "Data category"},
+				"extra":    map[string]any{"type": "string", "description": "Optional: search query, station ID, or breed ID depending on category"},
+			},
+			"required": []string{"category"},
+		},
+	},
+	{
+		Name: "memory_store", Description: "Store a fact or preference to remember across conversations. Use a short descriptive key.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key":      map[string]any{"type": "string", "description": "Short key like 'user_name' or 'preferred_language'"},
+				"content":  map[string]any{"type": "string", "description": "The fact to remember"},
+				"category": map[string]any{"type": "string", "description": "Optional: general, preference, learning, error"},
+			},
+			"required": []string{"key", "content"},
+		},
+	},
+	{
+		Name: "memory_recall", Description: "Search persistent memory for stored facts. Empty query lists all memories.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "description": "Search term, or empty to list all"},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		Name: "memory_forget", Description: "Delete a specific memory by its key.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"key": map[string]any{"type": "string", "description": "Key of the memory to delete"},
+			},
+			"required": []string{"key"},
+		},
+	},
 }
 
-func ExecuteTool(name string, args map[string]any) (string, error) {
+type ToolContext struct {
+	DB         *sql.DB // for memory tools
+	GatewayURL string  // e.g. "https://inf.xnet.ngo"
+	GatewayKey string
+}
+
+func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, error) {
 	str := func(key string) string {
 		v, _ := args[key].(string)
 		return v
@@ -132,7 +204,93 @@ func ExecuteTool(name string, args map[string]any) (string, error) {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 12000))
 		return string(data), nil
 
+	case "search_web":
+		return queryGateway(ctx, "search_web", str("query"))
+
+	case "search_images":
+		return queryGateway(ctx, "image_search", str("query"))
+
+	case "query_data":
+		return queryGateway(ctx, str("category"), str("extra"))
+
+	case "memory_store":
+		if ctx.DB == nil {
+			return "", fmt.Errorf("no database")
+		}
+		key, content := str("key"), str("content")
+		cat := str("category")
+		if cat == "" {
+			cat = "general"
+		}
+		now := time.Now().UnixMilli()
+		_, err := ctx.DB.Exec("INSERT INTO memories(key,content,category,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET content=?,category=?,updatedAt=?",
+			key, content, cat, now, now, content, cat, now)
+		if err != nil {
+			return "", err
+		}
+		return "Stored memory: " + key, nil
+
+	case "memory_recall":
+		if ctx.DB == nil {
+			return "", fmt.Errorf("no database")
+		}
+		q := str("query")
+		var rows *sql.Rows
+		var err error
+		if q == "" {
+			rows, err = ctx.DB.Query("SELECT key,content,category FROM memories ORDER BY updatedAt DESC")
+		} else {
+			rows, err = ctx.DB.Query("SELECT key,content,category FROM memories WHERE key LIKE '%'||?||'%' OR content LIKE '%'||?||'%' ORDER BY updatedAt DESC", q, q)
+		}
+		if err != nil {
+			return "", err
+		}
+		defer rows.Close()
+		var b strings.Builder
+		for rows.Next() {
+			var k, c, cat string
+			rows.Scan(&k, &c, &cat)
+			fmt.Fprintf(&b, "- %s: %s [%s]\n", k, c, cat)
+		}
+		if b.Len() == 0 {
+			return "No memories found.", nil
+		}
+		return b.String(), nil
+
+	case "memory_forget":
+		if ctx.DB == nil {
+			return "", fmt.Errorf("no database")
+		}
+		key := str("key")
+		ctx.DB.Exec("DELETE FROM memories WHERE key=?", key)
+		return "Deleted memory: " + key, nil
+
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+func queryGateway(ctx *ToolContext, category, extra string) (string, error) {
+	if ctx.GatewayURL == "" {
+		return "", fmt.Errorf("no gateway configured")
+	}
+	base := strings.TrimRight(ctx.GatewayURL, "/")
+	base = strings.TrimSuffix(base, "/chat/completions")
+	base = strings.TrimSuffix(base, "/v1")
+	url := fmt.Sprintf("%s/v1/data?q=%s&extra=%s", base, category, extra)
+	req, _ := http.NewRequest("GET", url, nil)
+	if ctx.GatewayKey != "" {
+		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 12000))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("gateway %d: %s", resp.StatusCode, string(data))
+	}
+	return string(data), nil
 }
