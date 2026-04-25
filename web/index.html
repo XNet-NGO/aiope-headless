@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>AIOPE</title>
 <meta name="theme-color" content="#000000">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -33,9 +36,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .conv-item .title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .conv-item .del{display:none;background:none;border:none;color:var(--error);cursor:pointer;font-size:14px;padding:2px 6px}
 .conv-item:hover .del{display:block}
-.conv-item .time{font-size:10px;color:var(--text-secondary)}
-.sidebar-footer{padding:12px;border-top:1px solid var(--outline);display:flex;gap:8px}
-.sidebar-footer button{flex:1;background:var(--card-bg);border:1px solid var(--outline);color:var(--text-secondary);border-radius:6px;padding:6px;font-size:11px;cursor:pointer}
+.sidebar-footer{padding:12px;border-top:1px solid var(--outline)}
+.sidebar-footer button{width:100%;background:var(--card-bg);border:1px solid var(--outline);color:var(--text-secondary);border-radius:6px;padding:8px;font-size:12px;cursor:pointer}
+.sidebar-footer button:hover{color:var(--text-primary);border-color:var(--text-secondary)}
 
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
 .main-hdr{padding:12px 16px;border-bottom:1px solid var(--outline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -43,13 +46,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .main-hdr .menu-btn{display:none;background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;margin-right:12px}
 
 .messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:80%;padding:10px 14px;font-size:14px;line-height:1.6}
-.msg-user{background:var(--user-bubble);border-radius:12px 12px 2px 12px;align-self:flex-end}
+.msg{max-width:80%;padding:10px 14px;font-size:14px;line-height:1.6;word-wrap:break-word}
+.msg-user{background:var(--user-bubble);border-radius:12px 12px 2px 12px;align-self:flex-end;white-space:pre-wrap}
 .msg-assistant{background:var(--assistant-bubble);border-radius:12px 12px 12px 2px;align-self:flex-start}
-.msg-assistant pre{background:var(--code-bg);border-radius:8px;padding:12px;overflow-x:auto;margin:8px 0;font-size:13px}
+.msg-assistant pre{background:var(--code-bg);border-radius:8px;padding:12px;overflow-x:auto;margin:8px 0;font-size:13px;position:relative}
+.msg-assistant pre code{background:none;color:var(--code-text);padding:0;font-size:13px}
 .msg-assistant code{background:var(--inline-code-bg);color:var(--inline-code-text);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:13px}
-.msg-assistant pre code{background:none;color:var(--code-text);padding:0}
 .msg-assistant p{margin:6px 0}
+.msg-assistant p:first-child{margin-top:0}
 .msg-assistant h1,.msg-assistant h2,.msg-assistant h3{color:var(--primary);margin:8px 0 4px}
 .msg-assistant a{color:var(--primary)}
 .msg-assistant blockquote{border-left:3px solid var(--primary);padding-left:12px;color:var(--text-secondary);margin:8px 0}
@@ -57,12 +61,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .msg-assistant table{border-collapse:collapse;width:100%;margin:8px 0}
 .msg-assistant th{background:var(--card-bg)}
 .msg-assistant th,.msg-assistant td{border:1px solid var(--outline);padding:6px 10px;text-align:left;font-size:13px}
+.msg-assistant .copy-btn{position:absolute;top:6px;right:6px;background:var(--card-bg);border:1px solid var(--outline);color:var(--text-secondary);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer}
+.msg-assistant .copy-btn:hover{color:var(--text-primary)}
 
 .empty-state{flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:15px}
 
 .input-area{background:var(--surface-variant);border-top:1px solid var(--outline);padding:12px 16px;flex-shrink:0}
 .mode-pills{display:flex;gap:4px;margin-bottom:8px}
-.mode-pill{padding:4px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;background:var(--card-bg);color:var(--text-secondary);border:1px solid var(--outline)}
+.mode-pill{padding:4px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;background:var(--card-bg);color:var(--text-secondary);border:1px solid var(--outline);user-select:none}
 .mode-pill.active{background:var(--primary-container);color:var(--primary);border-color:var(--primary)}
 .input-row{display:flex;gap:8px;align-items:flex-end}
 .input-row textarea{flex:1;background:var(--card-bg);color:var(--text-primary);border:1px solid var(--outline);border-radius:12px;padding:10px 14px;resize:none;font-size:15px;font-family:inherit;min-height:44px;max-height:200px}
@@ -73,6 +79,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 
 .streaming-cursor::after{content:'▊';animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* Settings modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface-variant);border:1px solid var(--outline);border-radius:12px;width:90%;max-width:600px;max-height:80vh;display:flex;flex-direction:column}
+.modal-hdr{padding:12px 16px;border-bottom:1px solid var(--outline);display:flex;justify-content:space-between;align-items:center}
+.modal-hdr h3{font-size:15px;color:var(--primary)}
+.modal-close{background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer}
+.modal-tabs{display:flex;border-bottom:1px solid var(--outline)}
+.modal-tab{padding:10px 16px;font-size:13px;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent}
+.modal-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.modal-body{flex:1;overflow-y:auto;padding:16px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px}
+.field input,.field textarea,.field select{width:100%;background:var(--card-bg);color:var(--text-primary);border:1px solid var(--outline);border-radius:8px;padding:8px 12px;font-size:14px;font-family:inherit}
+.field input:focus,.field textarea:focus{border-color:var(--primary);outline:none}
+.field textarea{min-height:60px;resize:vertical}
+.prov-item{display:flex;align-items:center;justify-content:space-between;padding:10px;border:1px solid var(--outline);border-radius:8px;margin-bottom:8px;cursor:pointer}
+.prov-item:hover{border-color:var(--text-secondary)}
+.prov-item.active{border-color:var(--primary);background:var(--primary-container)}
+.prov-item .prov-label{font-size:14px}
+.prov-item .prov-model{font-size:11px;color:var(--text-secondary)}
+.prov-actions{display:flex;gap:6px}
+.prov-actions button{background:none;border:1px solid var(--outline);color:var(--text-secondary);border-radius:4px;padding:4px 8px;font-size:11px;cursor:pointer}
+.prov-actions button:hover{color:var(--text-primary)}
+.btn-primary{background:var(--primary);color:#000;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.btn-primary:hover{opacity:.9}
 
 @media(max-width:768px){
   .sidebar{position:fixed;left:-260px;top:0;bottom:0;z-index:100;transition:left .2s}
@@ -87,14 +120,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 <body>
 <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 <div class="sidebar" id="sidebar">
-  <div class="sidebar-hdr">
-    <h2>AIOPE</h2>
-    <button class="new-btn" onclick="newChat()">+ New</button>
-  </div>
+  <div class="sidebar-hdr"><h2>AIOPE</h2><button class="new-btn" onclick="newChat()">+ New</button></div>
   <div class="conv-list" id="convList"></div>
-  <div class="sidebar-footer">
-    <button onclick="openSettings()">⚙ Settings</button>
-  </div>
+  <div class="sidebar-footer"><button onclick="openSettings()">⚙ Settings</button></div>
 </div>
 <div class="main">
   <div class="main-hdr">
@@ -103,9 +131,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
       <span class="chat-title" id="chatTitle">AIOPE</span>
     </div>
   </div>
-  <div class="messages" id="messages">
-    <div class="empty-state" id="emptyState">Start a conversation</div>
-  </div>
+  <div class="messages" id="messages"><div class="empty-state">Start a conversation</div></div>
   <div class="input-area">
     <div class="mode-pills" id="modePills">
       <div class="mode-pill active" onclick="setMode('chat')">CHAT</div>
@@ -118,19 +144,37 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     </div>
   </div>
 </div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <div class="modal-hdr"><h3>Settings</h3><button class="modal-close" onclick="closeSettings()">✕</button></div>
+    <div class="modal-tabs">
+      <div class="modal-tab active" onclick="settingsTab('providers')">Providers</div>
+      <div class="modal-tab" onclick="settingsTab('agent')">Agent</div>
+    </div>
+    <div class="modal-body" id="settingsBody"></div>
+  </div>
+</div>
+
 <script>
+// Markdown setup
+marked.setOptions({gfm:true,breaks:true,highlight:(code,lang)=>{
+  if(lang&&hljs.getLanguage(lang))return hljs.highlight(code,{language:lang}).value;
+  return hljs.highlightAuto(code).value;
+}});
+
 const S={convs:[],active:null,msgs:[],streaming:false,streamId:null,streamContent:'',mode:'chat'};
 let ws;
 
-// API
 const api={
   async get(u){const r=await fetch(u);return r.json()},
   async post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})},
+  async put(u,b){return fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})},
   async del(u){return fetch(u,{method:'DELETE'})},
   async patch(u,b){return fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 };
 
-// WebSocket
 function connectWS(){
   const proto=location.protocol==='https:'?'wss:':'ws:';
   ws=new WebSocket(proto+'//'+location.host+'/ws');
@@ -140,20 +184,18 @@ function connectWS(){
       case 'conversation.created':
         if(!S.convs.find(c=>c.id===m.conversation.id)){S.convs.unshift(m.conversation);renderSidebar()}
         break;
-      case 'conversation.updated':
+      case 'conversation.updated':{
         const c=S.convs.find(x=>x.id===m.id);
         if(c){c.title=m.title;c.updatedAt=m.updatedAt;renderSidebar()}
         if(S.active===m.id)document.getElementById('chatTitle').textContent=m.title;
-        break;
+        break;}
       case 'conversation.deleted':
         S.convs=S.convs.filter(x=>x.id!==m.id);
         if(S.active===m.id){S.active=null;S.msgs=[];renderMessages()}
-        renderSidebar();
-        break;
+        renderSidebar();break;
       case 'message.created':
         if(m.message.conversationId===S.active&&!S.msgs.find(x=>x.id===m.message.id)){
-          S.msgs.push(m.message);if(!S.streaming)renderMessages();
-        }
+          S.msgs.push(m.message);if(!S.streaming)renderMessages();}
         break;
       case 'stream.start':
         if(m.conversationId===S.active){S.streaming=true;S.streamId=m.messageId;S.streamContent='';renderMessages();updateSendBtn()}
@@ -172,26 +214,39 @@ function connectWS(){
   ws.onclose=()=>setTimeout(connectWS,2000);
 }
 
-// Render
 function renderSidebar(){
-  const el=document.getElementById('convList');
-  el.innerHTML=S.convs.map(c=>`<div class="conv-item${c.id===S.active?' active':''}" onclick="selectConv('${c.id}')"><span class="title">${esc(c.title)}</span><button class="del" onclick="event.stopPropagation();delConv('${c.id}')">✕</button></div>`).join('');
+  document.getElementById('convList').innerHTML=S.convs.map(c=>
+    `<div class="conv-item${c.id===S.active?' active':''}" onclick="selectConv('${c.id}')">
+      <span class="title">${esc(c.title)}</span>
+      <button class="del" onclick="event.stopPropagation();delConv('${c.id}')">✕</button>
+    </div>`).join('');
+}
+
+function md(s){
+  if(!s)return'';
+  let html=marked.parse(s);
+  // Add copy buttons to code blocks
+  html=html.replace(/<pre><code/g,'<pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code');
+  return html;
 }
 
 function renderMessages(){
   const el=document.getElementById('messages');
-  const empty=document.getElementById('emptyState');
-  if(!S.active){el.innerHTML='';empty.style.display='flex';return}
-  empty.style.display='none';
+  if(!S.active){el.innerHTML='<div class="empty-state">Start a conversation</div>';return}
   let html=S.msgs.map(m=>`<div class="msg msg-${m.role}">${m.role==='assistant'?md(m.content):esc(m.content)}</div>`).join('');
   if(S.streaming)html+=`<div class="msg msg-assistant"><span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
   el.innerHTML=html;
   el.scrollTop=el.scrollHeight;
 }
 
+let streamRaf=0;
 function renderStreamDelta(){
-  const el=document.getElementById('streamEl');
-  if(el){el.innerHTML=md(S.streamContent);const p=el.closest('.messages');if(p)p.scrollTop=p.scrollHeight}
+  if(streamRaf)return;
+  streamRaf=requestAnimationFrame(()=>{
+    streamRaf=0;
+    const el=document.getElementById('streamEl');
+    if(el){el.innerHTML=md(S.streamContent);const p=el.closest('.messages');if(p)p.scrollTop=p.scrollHeight}
+  });
 }
 
 function updateSendBtn(){
@@ -206,7 +261,6 @@ function appendError(err){
   el.scrollTop=el.scrollHeight;
 }
 
-// Actions
 async function newChat(){
   const r=await api.post('/api/conversations',{title:'New Chat'});
   const c=await r.json();
@@ -227,15 +281,12 @@ async function selectConv(id){
   if(window.innerWidth<768)toggleSidebar();
 }
 
-async function delConv(id){
-  await api.del('/api/conversations/'+id);
-}
+async function delConv(id){await api.del('/api/conversations/'+id)}
 
 function send(){
   if(S.streaming){ws.send(JSON.stringify({type:'chat.cancel',conversationId:S.active}));return}
   const input=document.getElementById('input');
-  const text=input.value.trim();
-  if(!text)return;
+  const text=input.value.trim();if(!text)return;
   input.value='';input.style.height='auto';
   ws.send(JSON.stringify({type:'chat.send',conversationId:S.active||'',content:text,mode:S.mode}));
 }
@@ -245,43 +296,154 @@ function setMode(m){
   document.querySelectorAll('.mode-pill').forEach(el=>el.classList.toggle('active',el.textContent.toLowerCase()===m));
 }
 
-function handleKey(e){
-  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}
-}
-
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
 function autoGrow(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,200)+'px'}
-
-function toggleSidebar(){
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('overlay').classList.toggle('open');
-}
-
-function openSettings(){/* TODO */}
-
-// Markdown (minimal)
-function md(s){
-  if(!s)return'';
-  return s
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g,'<em>$1</em>')
-    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
-    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
-    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
-    .replace(/^- (.+)$/gm,'<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
-    .replace(/\n/g,'<br>');
-}
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').classList.toggle('open')}
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+function copyCode(btn){const code=btn.nextElementSibling;navigator.clipboard.writeText(code.textContent);btn.textContent='Copied!';setTimeout(()=>btn.textContent='Copy',1500)}
+
+// Settings
+let settingsTabName='providers';
+function openSettings(){document.getElementById('settingsModal').classList.add('open');settingsTab('providers')}
+function closeSettings(){document.getElementById('settingsModal').classList.remove('open')}
+
+function settingsTab(name){
+  settingsTabName=name;
+  document.querySelectorAll('.modal-tab').forEach(t=>t.classList.toggle('active',t.textContent.toLowerCase()===name));
+  if(name==='providers')renderProviderSettings();
+  else if(name==='agent')renderAgentSettings();
+}
+
+async function renderProviderSettings(){
+  const body=document.getElementById('settingsBody');
+  const providers=await api.get('/api/providers');
+  body.innerHTML=`
+    <div id="provList">${providers.map(p=>`
+      <div class="prov-item${p.isActive?' active':''}" onclick="activateProvider('${p.id}')">
+        <div><div class="prov-label">${esc(p.label||p.builtinId||'Provider')}</div>
+        <div class="prov-model">${esc(p.selectedModelId||'no model')}${p.isActive?' ✓':''}</div></div>
+        <div class="prov-actions">
+          <button onclick="event.stopPropagation();editProvider('${p.id}')">Edit</button>
+          <button onclick="event.stopPropagation();deleteProvider('${p.id}')">Del</button>
+        </div>
+      </div>`).join('')}
+    </div>
+    <button class="btn-primary" onclick="editProvider()" style="margin-top:12px">+ Add Provider</button>
+    <div id="provEditor" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--outline)">
+      <input type="hidden" id="pe_id">
+      <div class="field"><label>Label</label><input id="pe_label" placeholder="My Provider"></div>
+      <div class="field"><label>API Base URL</label><input id="pe_base" placeholder="https://api.openai.com/v1"></div>
+      <div class="field"><label>API Key</label><input id="pe_key" type="password" placeholder="sk-..."></div>
+      <div class="field"><label>Model</label>
+        <div style="display:flex;gap:8px"><input id="pe_model" placeholder="gpt-4o" style="flex:1">
+        <button class="btn-primary" onclick="loadModels()" style="padding:8px 12px;font-size:12px">Load</button></div>
+        <select id="pe_models" style="margin-top:6px;display:none" onchange="document.getElementById('pe_model').value=this.value"></select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn-primary" onclick="saveProvider()">Save</button>
+        <button class="btn-primary" onclick="saveAndActivate()" style="background:var(--success)">Save & Activate</button>
+      </div>
+    </div>`;
+}
+
+let editingProvider=null;
+async function editProvider(id){
+  const editor=document.getElementById('provEditor');
+  editor.style.display='block';
+  if(id){
+    const providers=await api.get('/api/providers');
+    editingProvider=providers.find(p=>p.id===id);
+    if(editingProvider){
+      document.getElementById('pe_id').value=id;
+      document.getElementById('pe_label').value=editingProvider.label||'';
+      document.getElementById('pe_base').value=editingProvider.apiBase||'';
+      document.getElementById('pe_key').value=editingProvider.apiKey||'';
+      document.getElementById('pe_model').value=editingProvider.selectedModelId||'';
+    }
+  }else{
+    editingProvider=null;
+    document.getElementById('pe_id').value='';
+    document.getElementById('pe_label').value='';
+    document.getElementById('pe_base').value='';
+    document.getElementById('pe_key').value='';
+    document.getElementById('pe_model').value='';
+  }
+}
+
+async function saveProvider(){
+  const p={
+    id:document.getElementById('pe_id').value,
+    label:document.getElementById('pe_label').value,
+    apiBase:document.getElementById('pe_base').value,
+    apiKey:document.getElementById('pe_key').value,
+    selectedModelId:document.getElementById('pe_model').value,
+    builtinId:'openai'
+  };
+  if(p.id){await api.put('/api/providers/'+p.id,p)}
+  else{await api.post('/api/providers',p)}
+  renderProviderSettings();
+}
+
+async function saveAndActivate(){
+  const id=document.getElementById('pe_id').value;
+  await saveProvider();
+  const providers=await api.get('/api/providers');
+  const target=id||providers[providers.length-1]?.id;
+  if(target)await activateProvider(target);
+}
+
+async function activateProvider(id){
+  await api.post('/api/providers/'+id+'/activate');
+  renderProviderSettings();
+}
+
+async function deleteProvider(id){
+  await api.del('/api/providers/'+id);
+  renderProviderSettings();
+}
+
+async function loadModels(){
+  const id=document.getElementById('pe_id').value;
+  if(!id){alert('Save the provider first');return}
+  const sel=document.getElementById('pe_models');
+  sel.style.display='block';sel.innerHTML='<option>Loading...</option>';
+  try{
+    const models=await api.get('/api/providers/'+id+'/models');
+    sel.innerHTML=models.sort((a,b)=>a.id.localeCompare(b.id)).map(m=>`<option value="${m.id}">${m.id}</option>`).join('');
+  }catch(e){sel.innerHTML='<option>Error loading models</option>'}
+}
+
+const agentKeys=[
+  {key:'agent_identity_name_role',label:'Name & Role',placeholder:'You are AIOPE, a personal intelligent agent'},
+  {key:'agent_identity_personality',label:'Personality',placeholder:'Competent, efficient, quietly confident.'},
+  {key:'agent_identity_tone',label:'Tone',placeholder:'Concise and professional.'},
+  {key:'agent_values_principles',label:'Principles',placeholder:'Privacy first, efficiency, autonomy'},
+  {key:'agent_values_constraints',label:'Constraints',placeholder:'Confirm significant actions'},
+  {key:'agent_preferences_response_style',label:'Response Style',placeholder:'Markdown code blocks, tables, bullets'},
+  {key:'agent_preferences_formatting',label:'Formatting',placeholder:''},
+  {key:'agent_context_user_info',label:'User Info',placeholder:''},
+  {key:'agent_context_environment',label:'Environment',placeholder:''},
+  {key:'agent_context_projects',label:'Projects',placeholder:''},
+  {key:'agent_tools_tool_guidance',label:'Tool Guidance',placeholder:''},
+];
+
+async function renderAgentSettings(){
+  const body=document.getElementById('settingsBody');
+  const settings=await api.get('/api/settings');
+  body.innerHTML=agentKeys.map(k=>
+    `<div class="field"><label>${k.label}</label>
+    <textarea id="sk_${k.key}" placeholder="${esc(k.placeholder)}" rows="2" onchange="saveSetting('${k.key}',this.value)">${esc(settings[k.key]||'')}</textarea></div>`
+  ).join('');
+}
+
+async function saveSetting(key,value){
+  await api.put('/api/settings/'+key,{value});
+}
 
 // Init
 async function init(){
-  const data=await api.get('/api/conversations');
-  S.convs=data||[];
-  renderSidebar();
-  connectWS();
+  S.convs=await api.get('/api/conversations')||[];
+  renderSidebar();connectWS();
   document.getElementById('input').focus();
 }
 init();

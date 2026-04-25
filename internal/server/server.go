@@ -8,11 +8,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/XNet-NGO/AIOPE-Headless/internal/conversation"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/llm"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/ws"
 	"github.com/coder/websocket"
@@ -23,10 +25,12 @@ type Server struct {
 	Conversations *conversation.Service
 	Messages      *message.Service
 	Settings      *settings.Service
+	Providers     *provider.Service
 	Hub           *ws.Hub
 	Provider      llm.Provider
 	Model         string
 	WebFS         fs.FS
+	mu            sync.RWMutex
 }
 
 func (s *Server) Handler() http.Handler {
@@ -40,6 +44,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/conversations/{id}", s.deleteConversation)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings/{key}", s.setSetting)
+
+	// Provider routes
+	mux.HandleFunc("GET /api/providers", s.listProviders)
+	mux.HandleFunc("POST /api/providers", s.createProvider)
+	mux.HandleFunc("PUT /api/providers/{id}", s.updateProvider)
+	mux.HandleFunc("DELETE /api/providers/{id}", s.deleteProvider)
+	mux.HandleFunc("POST /api/providers/{id}/activate", s.activateProvider)
+	mux.HandleFunc("GET /api/providers/{id}/models", s.fetchModels)
 
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
@@ -200,10 +212,12 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	var chatMsgs []llm.ChatMessage
 
 	// System prompt from settings
-	prompt, _ := s.Settings.Get("agent_identity_name_role")
-	if prompt != "" {
-		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: prompt})
+	allSettings, _ := s.Settings.All()
+	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
+	if sysPrompt == "" {
+		sysPrompt = "You are AIOPE, a helpful AI assistant."
 	}
+	chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: sysPrompt})
 	for _, m := range msgs {
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
 	}
@@ -213,12 +227,15 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
 	var fullContent strings.Builder
+	s.mu.RLock()
 	model := s.Model
+	prov := s.Provider
+	s.mu.RUnlock()
 	if model == "" {
 		model = "gpt-4o"
 	}
 
-	err = s.Provider.Stream(chatMsgs, model, func(ev llm.StreamEvent) {
+	err = prov.Stream(chatMsgs, model, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			fullContent.WriteString(ev.Delta)
 			s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
@@ -265,6 +282,85 @@ func (s *Server) autoTitle(convID, userMsg string) {
 	if t != "" && len(t) < 100 {
 		s.Conversations.UpdateTitle(convID, t)
 		s.Hub.BroadcastJSON(map[string]any{"type": "conversation.updated", "id": convID, "title": t, "updatedAt": time.Now().UnixMilli()})
+	}
+}
+
+func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
+	ps, _ := s.Providers.List()
+	if ps == nil {
+		ps = []provider.Profile{}
+	}
+	writeJSON(w, ps)
+}
+
+func (s *Server) createProvider(w http.ResponseWriter, r *http.Request) {
+	var p provider.Profile
+	json.NewDecoder(r.Body).Decode(&p)
+	if err := s.Providers.Create(&p); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(201)
+	writeJSON(w, p)
+}
+
+func (s *Server) updateProvider(w http.ResponseWriter, r *http.Request) {
+	var p provider.Profile
+	json.NewDecoder(r.Body).Decode(&p)
+	p.ID = r.PathValue("id")
+	if err := s.Providers.Update(&p); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	s.refreshProvider()
+	w.WriteHeader(204)
+}
+
+func (s *Server) deleteProvider(w http.ResponseWriter, r *http.Request) {
+	s.Providers.Delete(r.PathValue("id"))
+	s.refreshProvider()
+	w.WriteHeader(204)
+}
+
+func (s *Server) activateProvider(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Providers.SetActive(id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	s.refreshProvider()
+	w.WriteHeader(204)
+}
+
+func (s *Server) fetchModels(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ps, _ := s.Providers.List()
+	var p *provider.Profile
+	for i := range ps {
+		if ps[i].ID == id {
+			p = &ps[i]
+			break
+		}
+	}
+	if p == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	models, err := s.Providers.FetchModels(p)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	writeJSON(w, models)
+}
+
+func (s *Server) refreshProvider() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.Providers.GetActive()
+	if p != nil {
+		s.Provider = &llm.OpenAI{APIKey: p.APIKey, APIBase: p.APIBase}
+		s.Model = p.SelectedModelID
 	}
 }
 

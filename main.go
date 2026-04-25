@@ -10,6 +10,7 @@ import (
 	"github.com/XNet-NGO/AIOPE-Headless/internal/db"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/llm"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/server"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/ws"
@@ -28,15 +29,15 @@ func main() {
 	defer database.Close()
 
 	// Load provider from DB
-	var provider llm.Provider
+	provSvc := &provider.Service{DB: database}
+	var prov llm.Provider
 	var model string
-	var row struct{ json string }
-	err = database.QueryRow("SELECT json FROM providers WHERE isActive=1 LIMIT 1").Scan(&row.json)
-	if err == nil {
-		provider, model = llm.ProviderFromJSON(row.json)
+	if active := provSvc.GetActive(); active != nil {
+		prov = &llm.OpenAI{APIKey: active.APIKey, APIBase: active.APIBase}
+		model = active.SelectedModelID
 	}
-	if provider == nil {
-		provider = &llm.OpenAI{}
+	if prov == nil {
+		prov = &llm.OpenAI{}
 	}
 
 	webFS, _ := fs.Sub(webEmbed, "web")
@@ -45,8 +46,9 @@ func main() {
 		Conversations: &conversation.Service{DB: database},
 		Messages:      &message.Service{DB: database},
 		Settings:      &settings.Service{DB: database},
+		Providers:     provSvc,
 		Hub:           ws.NewHub(),
-		Provider:      provider,
+		Provider:      prov,
 		Model:         model,
 		WebFS:         webFS,
 	}
