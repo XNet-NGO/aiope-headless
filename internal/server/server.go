@@ -190,6 +190,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, content, mode string) {
+	log.Printf("chat.send: conv=%s content=%q mode=%s", convID, content, mode)
 	// Create conversation if needed
 	if convID == "" {
 		c, err := s.Conversations.Create("New Chat")
@@ -246,6 +247,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	})
 
 	if err != nil {
+		log.Printf("LLM error: %v", err)
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
 		return
 	}

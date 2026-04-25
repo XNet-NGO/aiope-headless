@@ -13,6 +13,7 @@ import (
 
 type ModelConfig struct {
 	ModelID         string   `json:"modelId"`
+	ToolsOverride   *bool    `json:"toolsOverride,omitempty"`
 	Temperature     *float64 `json:"temperature,omitempty"`
 	MaxTokens       *int     `json:"maxTokens,omitempty"`
 	ContextTokens   int      `json:"contextTokens"`
