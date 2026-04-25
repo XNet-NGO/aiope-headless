@@ -80,6 +80,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .streaming-cursor::after{content:'▊';animation:blink 1s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
+/* Reasoning/thinking block */
+.reasoning{margin-bottom:8px;border:1px solid var(--outline);border-radius:8px;overflow:hidden}
+.reasoning summary{padding:8px 12px;font-size:12px;color:var(--text-secondary);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+.reasoning summary::before{content:'💭'}
+.reasoning.active summary{color:var(--primary)}
+.reasoning .reasoning-text{padding:4px 12px 10px;font-size:13px;color:var(--text-secondary);line-height:1.5;max-height:200px;overflow-y:auto;white-space:pre-wrap}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.reasoning.active summary::after{content:'';display:inline-block;width:40px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--outline),var(--primary),var(--outline));background-size:200% 100%;animation:shimmer 1.5s infinite}
+
+/* Tool call chips */
+.tool-strip{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.tool-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:12px;font-size:12px;font-family:monospace;border:1px solid var(--outline);cursor:pointer;user-select:none;transition:all .15s}
+.tool-chip.running{border-color:var(--primary);color:var(--primary)}
+.tool-chip.done{border-color:var(--success);color:var(--success)}
+.tool-chip.error{border-color:var(--error);color:var(--error)}
+.tool-chip .icon{font-size:11px}
+.tool-detail{display:none;margin-top:6px;padding:8px;background:var(--card-bg);border:1px solid var(--outline);border-radius:8px;font-size:12px;font-family:monospace;max-height:160px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary)}
+.tool-detail.open{display:block}
+
+/* Images in messages */
+.msg-assistant img{max-width:100%;border-radius:8px;margin:8px 0;cursor:pointer}
+
 /* Settings modal */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
@@ -164,7 +186,7 @@ marked.setOptions({gfm:true,breaks:true,highlight:(code,lang)=>{
   return hljs.highlightAuto(code).value;
 }});
 
-const S={convs:[],active:null,msgs:[],streaming:false,streamId:null,streamContent:'',mode:'chat'};
+const S={convs:[],active:null,msgs:[],streaming:false,streamId:null,streamContent:'',streamReasoning:'',streamTools:[],mode:'chat'};
 let ws;
 
 const api={
@@ -198,13 +220,22 @@ function connectWS(){
           S.msgs.push(m.message);if(!S.streaming)renderMessages();}
         break;
       case 'stream.start':
-        if(m.conversationId===S.active){S.streaming=true;S.streamId=m.messageId;S.streamContent='';renderMessages();updateSendBtn()}
+        if(m.conversationId===S.active){S.streaming=true;S.streamId=m.messageId;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()}
         break;
       case 'stream.delta':
         if(m.conversationId===S.active){S.streamContent+=m.delta;renderStreamDelta()}
         break;
+      case 'stream.reasoning':
+        if(m.conversationId===S.active){S.streamReasoning+=m.delta;renderStreamDelta()}
+        break;
+      case 'stream.tool_call':
+        if(m.conversationId===S.active){S.streamTools.push({id:m.toolCall.id,name:m.toolCall.name,args:JSON.stringify(m.toolCall.arguments,null,2),status:'running',result:''});renderStreamDelta()}
+        break;
+      case 'stream.tool_result':
+        if(m.conversationId===S.active){const t=S.streamTools.find(x=>x.id===m.toolCallId);if(t){t.status=m.isError?'error':'done';t.result=m.result||''}renderStreamDelta()}
+        break;
       case 'stream.end':
-        if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';updateSendBtn()}
+        if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];updateSendBtn()}
         break;
       case 'stream.error':
         if(m.conversationId===S.active){S.streaming=false;S.streamId=null;appendError(m.error);updateSendBtn()}
@@ -224,6 +255,8 @@ function renderSidebar(){
 
 function md(s){
   if(!s)return'';
+  // Strip <thought>/<think> tags from saved messages
+  s=s.replace(/<\/?(?:thought|think)>/g,'');
   let html=marked.parse(s);
   // Add copy buttons to code blocks
   html=html.replace(/<pre><code/g,'<pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code');
@@ -234,9 +267,25 @@ function renderMessages(){
   const el=document.getElementById('messages');
   if(!S.active){el.innerHTML='<div class="empty-state">Start a conversation</div>';return}
   let html=S.msgs.map(m=>`<div class="msg msg-${m.role}">${m.role==='assistant'?md(m.content):esc(m.content)}</div>`).join('');
-  if(S.streaming)html+=`<div class="msg msg-assistant"><span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
+  if(S.streaming){
+    html+='<div class="msg msg-assistant">';
+    if(S.streamReasoning)html+=renderReasoning(S.streamReasoning,true);
+    if(S.streamTools.length)html+=renderToolStrip(S.streamTools);
+    html+=`<span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
+  }
   el.innerHTML=html;
   el.scrollTop=el.scrollHeight;
+}
+
+function renderReasoning(text,active){
+  return `<details class="reasoning${active?' active':''}"${active?' open':''}><summary>${active?'Thinking...':'Thought'}</summary><div class="reasoning-text">${esc(text)}</div></details>`;
+}
+
+function renderToolStrip(tools){
+  return '<div class="tool-strip">'+tools.map(t=>{
+    const icon=t.status==='running'?'⟳':t.status==='done'?'✓':'⚠';
+    return `<div class="tool-chip ${t.status}" onclick="this.nextElementSibling.classList.toggle('open')"><span class="icon">${icon}</span>${t.name}</div><div class="tool-detail">${t.args}${t.result?'\n───\n'+t.result:''}</div>`;
+  }).join('')+'</div>';
 }
 
 let streamRaf=0;
@@ -244,8 +293,27 @@ function renderStreamDelta(){
   if(streamRaf)return;
   streamRaf=requestAnimationFrame(()=>{
     streamRaf=0;
+    // Find or rebuild the streaming message
     const el=document.getElementById('streamEl');
-    if(el){el.innerHTML=md(S.streamContent);const p=el.closest('.messages');if(p)p.scrollTop=p.scrollHeight}
+    if(!el){renderMessages();return}
+    // Update reasoning
+    const msg=el.closest('.msg');
+    if(msg){
+      let rBlock=msg.querySelector('.reasoning');
+      if(S.streamReasoning){
+        if(!rBlock){const d=document.createElement('div');d.innerHTML=renderReasoning(S.streamReasoning,true);msg.insertBefore(d.firstChild,msg.firstChild);rBlock=msg.querySelector('.reasoning')}
+        else{rBlock.querySelector('.reasoning-text').textContent=S.streamReasoning;rBlock.className='reasoning active'}
+      }
+      // Update tool strip
+      let strip=msg.querySelector('.tool-strip');
+      if(S.streamTools.length){
+        const newStrip=document.createElement('div');newStrip.innerHTML=renderToolStrip(S.streamTools);
+        if(strip)strip.replaceWith(newStrip.firstChild);
+        else el.before(newStrip.firstChild);
+      }
+    }
+    el.innerHTML=md(S.streamContent);
+    const p=el.closest('.messages');if(p)p.scrollTop=p.scrollHeight;
   });
 }
 
