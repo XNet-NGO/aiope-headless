@@ -15,7 +15,7 @@ import (
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
 	"search_web": true, "search_images": true, "query_data": true,
-	"memory_recall": true,
+	"memory_recall": true, "ssh_exec": true,
 }
 
 var BuiltinTools = []ToolDef{
@@ -131,6 +131,38 @@ var BuiltinTools = []ToolDef{
 				"key": map[string]any{"type": "string", "description": "Key of the memory to delete"},
 			},
 			"required": []string{"key"},
+		},
+	},
+	{
+		Name: "ssh_start", Description: "Open persistent SSH session to a remote server. Resolves from ~/.ssh/config or connects by hostname. Returns connection status.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"server": map[string]any{"type": "string", "description": "Server name (from ~/.ssh/config) or hostname"},
+			},
+			"required": []string{"server"},
+		},
+	},
+	{
+		Name: "ssh_exec", Description: "Execute a command on an active remote SSH session. Returns stdout+stderr. Use ssh_start first.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"server":  map[string]any{"type": "string", "description": "Server name"},
+				"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 30)"},
+			},
+			"required": []string{"server", "command"},
+		},
+	},
+	{
+		Name: "ssh_exit", Description: "Close an active SSH session.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"server": map[string]any{"type": "string", "description": "Server name"},
+			},
+			"required": []string{"server"},
 		},
 	},
 }
@@ -264,6 +296,28 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		key := str("key")
 		ctx.DB.Exec("DELETE FROM memories WHERE key=?", key)
 		return "Deleted memory: " + key, nil
+
+	case "ssh_start":
+		server := str("server")
+		client, err := sshConnect(server)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf(`{"status":"connected","server":"%s","remote":"%s"}`, server, client.RemoteAddr()), nil
+
+	case "ssh_exec":
+		server := str("server")
+		command := str("command")
+		timeout := 30
+		if t, ok := args["timeout"].(float64); ok && t > 0 {
+			timeout = int(t)
+		}
+		return sshExec(server, command, timeout)
+
+	case "ssh_exit":
+		server := str("server")
+		sshDisconnect(server)
+		return fmt.Sprintf(`{"status":"disconnected","server":"%s"}`, server), nil
 
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
