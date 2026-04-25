@@ -1,0 +1,51 @@
+package message
+
+import (
+	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Message struct {
+	ID             string `json:"id"`
+	ConversationID string `json:"conversationId"`
+	Role           string `json:"role"`
+	Content        string `json:"content"`
+	Timestamp      int64  `json:"timestamp"`
+}
+
+type Service struct{ DB *sql.DB }
+
+func (s *Service) List(convID string) ([]Message, error) {
+	rows, err := s.DB.Query("SELECT id,conversationId,role,content,timestamp FROM messages WHERE conversationId=? ORDER BY timestamp ASC", convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Timestamp)
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func (s *Service) Add(convID, role, content string) (*Message, error) {
+	now := time.Now().UnixMilli()
+	m := &Message{ID: uuid.NewString(), ConversationID: convID, Role: role, Content: content, Timestamp: now}
+	_, err := s.DB.Exec("INSERT INTO messages(id,conversationId,role,content,imagePaths,timestamp) VALUES(?,?,?,?,'',?)",
+		m.ID, m.ConversationID, m.Role, m.Content, m.Timestamp)
+	return m, err
+}
+
+func (s *Service) Update(id, content string) error {
+	_, err := s.DB.Exec("UPDATE messages SET content=? WHERE id=?", content, id)
+	return err
+}
+
+func (s *Service) DeleteAfter(convID string, afterTimestamp int64) error {
+	_, err := s.DB.Exec("DELETE FROM messages WHERE conversationId=? AND timestamp>=?", convID, afterTimestamp)
+	return err
+}

@@ -1,6 +1,3 @@
--- AIOPE-Headless schema (compatible with AIOPE2 Room DB v4)
--- Column names use camelCase to match Room's default mapping.
-
 CREATE TABLE IF NOT EXISTS conversations (
     id        TEXT PRIMARY KEY,
     title     TEXT NOT NULL DEFAULT 'New Chat',
@@ -8,6 +5,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updatedAt DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
     id             TEXT PRIMARY KEY,
@@ -18,6 +16,7 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp      INTEGER NOT NULL,
     FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversationId);
 
 CREATE TABLE IF NOT EXISTS memories (
     key       TEXT PRIMARY KEY,
@@ -54,6 +53,3 @@ CREATE TABLE IF NOT EXISTS settings_kv (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversationId);
-CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updatedAt DESC);
