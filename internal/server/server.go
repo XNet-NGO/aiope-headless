@@ -698,8 +698,7 @@ func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language 
 	}
 
 	prompt := []llm.ChatMessage{
-		{Role: "system", Content: "Translate the following text to " + language + ". Reply with ONLY the translation, nothing else."},
-		{Role: "user", Content: content},
+		{Role: "user", Content: "Translate the following text to " + language + ". Output ONLY the translated text, no explanations, no original text, no labels:\n\n" + content},
 	}
 
 	prov.Stream(prompt, transModel, nil, func(ev llm.StreamEvent) {

@@ -187,10 +187,11 @@ type ToolContext struct {
 
 // Task model resolution — different models for different tasks
 var TaskModelDefaults = map[string]string{
-	"title":     "google-ai-studio/models-gemma-3-1b-it",
-	"summary":   "google-ai-studio/models-gemma-3-27b-it",
-	"image_gen": "pollinations-pollen/klein",
-	"subagent":  "google-ai-studio/models-gemma-4-26b-a4b-it",
+	"title":       "google-ai-studio/models-gemma-3-1b-it",
+	"summary":     "google-ai-studio/models-gemma-3-27b-it",
+	"image_gen":   "pollinations-pollen/klein",
+	"subagent":    "google-ai-studio/models-gemma-4-26b-a4b-it",
+	"translation": "google-ai-studio/models-gemma-3-12b-it",
 }
 
 func (ctx *ToolContext) ResolveTaskModel(task string) (string, string) {
