@@ -298,7 +298,7 @@ function renderMessages(){
     let trans=S.translations[m.id]?`<div class="translation">${esc(S.translations[m.id])}</div>`:'';
     let acts='';
     if(m.role==='assistant'){
-      acts=`<div class="msg-actions"><button class="msg-act" onclick="copyMsg(${i})">Copy</button><button class="msg-act" onclick="ttsMsg(${i})">🔊</button><button class="msg-act" onclick="retryMsg(${i})">Retry</button><button class="msg-act" onclick="forkMsg(${i})">Fork</button><button class="msg-act" onclick="compactMsg(${i})">Compact</button><button class="msg-act" onclick="translateMsg('${m.id}')">Translate</button></div>`;
+      acts=`<div class="msg-actions"><button class="msg-act" onclick="copyMsg(${i})">Copy</button><button class="msg-act" onclick="ttsMsg(${i})">🔊</button><button class="msg-act" onclick="retryMsg(${i})">Retry</button><button class="msg-act" onclick="forkMsg(${i})">Fork</button><button class="msg-act" onclick="compactMsg(${i})">Compact</button><select class="msg-act" onchange="translateMsg('${m.id}',this.value);this.selectedIndex=0"><option value="">Translate</option><option>English</option><option>Spanish</option><option>French</option><option>German</option><option>Chinese</option><option>Japanese</option><option>Korean</option><option>Portuguese</option><option>Russian</option><option>Arabic</option><option>Hindi</option><option>Italian</option></select></div>`;
     } else if(m.role==='user'){
       acts=`<div class="msg-actions"><button class="msg-act" onclick="copyMsg(${i})">Copy</button><button class="msg-act" onclick="editMsg(${i})">Edit</button><button class="msg-act" onclick="forkMsg(${i})">Fork</button><button class="msg-act" onclick="compactMsg(${i})">Compact</button></div>`;
     }
@@ -404,7 +404,11 @@ function setMode(m){
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}
 
 // --- Message actions ---
-function copyMsg(i){navigator.clipboard.writeText(S.msgs[i]?.content||'')}
+function copyMsg(i){
+  const t=S.msgs[i]?.content||'';
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t)}
+  else{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px';document.body.appendChild(a);a.select();document.execCommand('copy');document.body.removeChild(a)}
+}
 function ttsMsg(i){
   const u=window.speechSynthesis;
   if(u.speaking){u.cancel();return}
@@ -433,8 +437,7 @@ function compactMsg(i){
   if(!S.active)return;
   ws.send(JSON.stringify({type:'chat.compact',conversationId:S.active,atIndex:i+1}));
 }
-function translateMsg(msgId){
-  const lang=prompt('Translate to:','English');
+function translateMsg(msgId,lang){
   if(!lang||!S.active)return;
   S.translations[msgId]='';
   ws.send(JSON.stringify({type:'chat.translate',conversationId:S.active,messageId:msgId,language:lang}));
