@@ -427,8 +427,12 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func ListenAndServe(port int, handler http.Handler) error {
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("AIOPE-Headless running on http://localhost%s", addr)
+func ListenAndServe(bind string, port int, handler http.Handler) error {
+	host := bind
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	addr := fmt.Sprintf("%s:%d", host, port)
+	log.Printf("AIOPE-Headless running on http://%s", addr)
 	return http.ListenAndServe(addr, handler)
 }

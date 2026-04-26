@@ -59,7 +59,7 @@ func main() {
 		DB:            database,
 	}
 
-	log.Fatal(server.ListenAndServe(cfg.Port, srv.Handler()))
+	log.Fatal(server.ListenAndServe(cfg.Bind, cfg.Port, srv.Handler()))
 }
 
 func seedDefaults(svc *provider.Service, database *sql.DB) {

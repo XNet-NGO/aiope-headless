@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Port    int    `json:"port"`
+	Bind    string `json:"bind"`
 	DBPath  string `json:"db_path"`
 	SyncURL string `json:"sync_url"`
 }
@@ -26,6 +27,9 @@ func Load() *Config {
 	}
 	if v := os.Getenv("AIOPE_PORT"); v != "" {
 		json.Unmarshal([]byte(v), &c.Port)
+	}
+	if v := os.Getenv("AIOPE_BIND"); v != "" {
+		c.Bind = v
 	}
 	if v := os.Getenv("AIOPE_DB_PATH"); v != "" {
 		c.DBPath = v
