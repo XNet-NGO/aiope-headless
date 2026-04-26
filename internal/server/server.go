@@ -196,6 +196,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "chat.fork":
 			go s.handleFork(client, msg.ConversationID, msg.AtIndex)
 		case "chat.compact":
+			log.Printf("chat.compact: conv=%s atIndex=%d", msg.ConversationID, msg.AtIndex)
 			go s.handleCompact(client, msg.ConversationID, msg.AtIndex)
 		case "chat.translate":
 			go s.handleTranslate(client, msg.ConversationID, msg.MessageID, msg.Language)
@@ -631,30 +632,44 @@ func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
 
 	s.mu.RLock()
 	prov := s.Provider
+	mainModel := s.Model
 	s.mu.RUnlock()
 	if summaryModel == "" {
-		summaryModel = s.Model
+		summaryModel = mainModel
+	}
+	if summaryModel == "" {
+		summaryModel = "gpt-4o"
 	}
 
 	prompt := []llm.ChatMessage{
-		{Role: "system", Content: "Summarize this conversation concisely, preserving all key context needed to continue. Start with [Summary]."},
-		{Role: "user", Content: transcript.String()},
+		{Role: "user", Content: "Summarize this conversation concisely, preserving all key context needed to continue. Start with [Summary].\n\n" + transcript.String()},
 	}
 
 	client.SendJSON(map[string]any{"type": "compact.start", "conversationId": convID})
 
 	var summary strings.Builder
-	prov.Stream(prompt, summaryModel, nil, func(ev llm.StreamEvent) {
+	log.Printf("compact: using model %s for %d messages", summaryModel, atIndex)
+	err := prov.Stream(prompt, summaryModel, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			summary.WriteString(ev.Delta)
 		}
 	})
+	if err != nil {
+		log.Printf("compact: stream error: %v", err)
+	}
+
+	sumText := strings.TrimSpace(summary.String())
+	log.Printf("compact: summary length=%d", len(sumText))
+	if sumText == "" {
+		client.SendJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": "Compaction failed — empty summary"})
+		return
+	}
 
 	// Delete all messages, re-insert summary + remaining
 	if len(msgs) > 0 {
 		s.Messages.DeleteAfter(convID, 0)
 	}
-	s.Messages.Add(convID, "system", summary.String())
+	s.Messages.Add(convID, "system", sumText)
 	s.Messages.Add(convID, "system", "⟳ Context compacted — earlier messages summarized")
 	for _, m := range msgs[atIndex:] {
 		s.Messages.Add(convID, m.Role, m.Content)
