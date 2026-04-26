@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -367,8 +368,8 @@ func queryGateway(ctx *ToolContext, category, extra string) (string, error) {
 	base := strings.TrimRight(ctx.GatewayURL, "/")
 	base = strings.TrimSuffix(base, "/chat/completions")
 	base = strings.TrimSuffix(base, "/v1")
-	url := fmt.Sprintf("%s/v1/data?q=%s&extra=%s", base, category, extra)
-	req, _ := http.NewRequest("GET", url, nil)
+	u := fmt.Sprintf("%s/v1/data?q=%s&extra=%s", base, url.QueryEscape(category), url.QueryEscape(extra))
+	req, _ := http.NewRequest("GET", u, nil)
 	if ctx.GatewayKey != "" {
 		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
 	}

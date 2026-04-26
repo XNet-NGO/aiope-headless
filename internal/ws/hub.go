@@ -17,6 +17,17 @@ type Client struct {
 	Send chan []byte
 }
 
+func (c *Client) SendJSON(v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	select {
+	case c.Send <- data:
+	default:
+	}
+}
+
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[*Client]bool

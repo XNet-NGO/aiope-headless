@@ -178,6 +178,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			ConversationID string `json:"conversationId"`
 			Content        string `json:"content"`
 			Mode           string `json:"mode"`
+			MessageID      string `json:"messageId"`
+			AtIndex        int    `json:"atIndex"`
+			Language       string `json:"language"`
+			Text           string `json:"text"`
 		}
 		if json.Unmarshal(data, &msg) != nil {
 			continue
@@ -185,6 +189,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "chat.send":
 			go s.handleChatSend(ctx, client, msg.ConversationID, msg.Content, msg.Mode)
+		case "chat.retry":
+			go s.handleRetry(ctx, client, msg.ConversationID, msg.AtIndex, msg.Mode)
+		case "chat.edit_resend":
+			go s.handleEditResend(ctx, client, msg.ConversationID, msg.Text, msg.AtIndex, msg.Mode)
+		case "chat.fork":
+			go s.handleFork(client, msg.ConversationID, msg.AtIndex)
+		case "chat.compact":
+			go s.handleCompact(client, msg.ConversationID, msg.AtIndex)
+		case "chat.translate":
+			go s.handleTranslate(client, msg.ConversationID, msg.MessageID, msg.Language)
 		case "chat.cancel":
 			// TODO: cancellation
 		}
@@ -435,4 +449,265 @@ func ListenAndServe(bind string, port int, handler http.Handler) error {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	log.Printf("AIOPE-Headless running on http://%s", addr)
 	return http.ListenAndServe(addr, handler)
+}
+
+// --- Chat action handlers ---
+
+func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, error) {
+	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
+
+	s.mu.RLock()
+	prov := s.Provider
+	model := s.Model
+	s.mu.RUnlock()
+	if model == "" {
+		model = "gpt-4o"
+	}
+
+	tools := llm.BuiltinTools
+	if mode == "plan" {
+		var ro []llm.ToolDef
+		for _, t := range tools {
+			if t.Name != "run_sh" && t.Name != "write_file" {
+				ro = append(ro, t)
+			}
+		}
+		tools = ro
+	}
+
+	var gwURL, gwKey string
+	if active := s.Providers.GetActive(); active != nil {
+		gwURL = active.APIBase
+		gwKey = active.APIKey
+	}
+
+	orch := &llm.Orchestrator{
+		Provider: prov, Model: model, Tools: tools,
+		ToolCtx: &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
+		OnEvent: func(ev llm.StreamEvent) {
+			if ev.Delta != "" {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
+			}
+			if ev.Reasoning != "" {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.reasoning", "conversationId": convID, "messageId": assistantID, "delta": ev.Reasoning})
+			}
+			for _, tc := range ev.ToolCalls {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.tool_call", "conversationId": convID, "messageId": assistantID, "toolCall": tc})
+			}
+			for _, tr := range ev.ToolResults {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.tool_result", "conversationId": convID, "toolCallId": tr.ID, "name": tr.Name, "result": tr.Result, "isError": tr.IsErr})
+			}
+			if ev.Done {
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": convID, "messageId": assistantID, "finishReason": ev.FinishReason})
+			}
+		},
+	}
+	return orch.Run(chatMsgs)
+}
+
+func (s *Server) buildHistory(convID, mode string) []llm.ChatMessage {
+	msgs, _ := s.Messages.List(convID)
+	allSettings, _ := s.Settings.All()
+	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
+	if sysPrompt == "" {
+		sysPrompt = "You are AIOPE, a helpful AI assistant."
+	}
+	chatMsgs := []llm.ChatMessage{{Role: "system", Content: sysPrompt}}
+	for _, m := range msgs {
+		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
+	}
+	return chatMsgs
+}
+
+func (s *Server) handleRetry(_ context.Context, client *ws.Client, convID string, atIndex int, mode string) {
+	msgs, _ := s.Messages.List(convID)
+	if atIndex < 0 || atIndex >= len(msgs) {
+		return
+	}
+	// Delete from atIndex onward
+	s.Messages.DeleteAfter(convID, msgs[atIndex].Timestamp-1)
+	s.Hub.BroadcastJSON(map[string]any{"type": "messages.truncated", "conversationId": convID, "atIndex": atIndex})
+
+	chatMsgs := s.buildHistory(convID, mode)
+	assistantID := uuid.NewString()
+	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	if err != nil {
+		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
+		return
+	}
+	if fullContent != "" {
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		if aMsg != nil {
+			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
+		}
+	}
+	s.Conversations.Touch(convID)
+}
+
+func (s *Server) handleEditResend(_ context.Context, client *ws.Client, convID, text string, atIndex int, mode string) {
+	msgs, _ := s.Messages.List(convID)
+	if atIndex < 0 || atIndex >= len(msgs) {
+		return
+	}
+	// Delete from atIndex onward
+	s.Messages.DeleteAfter(convID, msgs[atIndex].Timestamp-1)
+	s.Hub.BroadcastJSON(map[string]any{"type": "messages.truncated", "conversationId": convID, "atIndex": atIndex})
+
+	// Add edited user message
+	userMsg, _ := s.Messages.Add(convID, "user", text)
+	if userMsg != nil {
+		s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": userMsg})
+	}
+
+	chatMsgs := s.buildHistory(convID, mode)
+	assistantID := uuid.NewString()
+	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	if err != nil {
+		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
+		return
+	}
+	if fullContent != "" {
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		if aMsg != nil {
+			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
+		}
+	}
+	s.Conversations.Touch(convID)
+}
+
+func (s *Server) handleFork(client *ws.Client, convID string, atIndex int) {
+	msgs, _ := s.Messages.List(convID)
+	if atIndex < 0 || atIndex > len(msgs) {
+		return
+	}
+
+	// Title from first user message
+	title := "Fork"
+	for _, m := range msgs[:atIndex] {
+		if m.Role == "user" {
+			t := m.Content
+			if len(t) > 30 {
+				t = t[:30]
+			}
+			title = "Fork: " + t
+			break
+		}
+	}
+
+	newConv, err := s.Conversations.Create(title)
+	if err != nil {
+		return
+	}
+	for _, m := range msgs[:atIndex] {
+		s.Messages.Add(newConv.ID, m.Role, m.Content)
+	}
+	s.Hub.BroadcastJSON(map[string]any{"type": "conversation.created", "conversation": newConv})
+	client.SendJSON(map[string]any{"type": "forked", "conversationId": convID, "newConversationId": newConv.ID})
+}
+
+func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
+	msgs, _ := s.Messages.List(convID)
+	if atIndex <= 0 || atIndex > len(msgs) {
+		return
+	}
+
+	// Build transcript of messages to compact
+	var transcript strings.Builder
+	for _, m := range msgs[:atIndex] {
+		c := m.Content
+		if len(c) > 2000 {
+			c = c[:2000] + "..."
+		}
+		fmt.Fprintf(&transcript, "[%s] %s\n\n", m.Role, c)
+	}
+
+	// Use summary task model
+	toolCtx := &llm.ToolContext{DB: s.DB}
+	if active := s.Providers.GetActive(); active != nil {
+		toolCtx.GatewayURL = active.APIBase
+		toolCtx.GatewayKey = active.APIKey
+	}
+	_, summaryModel := toolCtx.ResolveTaskModel("summary")
+
+	s.mu.RLock()
+	prov := s.Provider
+	s.mu.RUnlock()
+	if summaryModel == "" {
+		summaryModel = s.Model
+	}
+
+	prompt := []llm.ChatMessage{
+		{Role: "system", Content: "Summarize this conversation concisely, preserving all key context needed to continue. Start with [Summary]."},
+		{Role: "user", Content: transcript.String()},
+	}
+
+	client.SendJSON(map[string]any{"type": "compact.start", "conversationId": convID})
+
+	var summary strings.Builder
+	prov.Stream(prompt, summaryModel, nil, func(ev llm.StreamEvent) {
+		if ev.Delta != "" {
+			summary.WriteString(ev.Delta)
+		}
+	})
+
+	// Delete all messages, re-insert summary + remaining
+	if len(msgs) > 0 {
+		s.Messages.DeleteAfter(convID, 0)
+	}
+	s.Messages.Add(convID, "system", summary.String())
+	s.Messages.Add(convID, "system", "⟳ Context compacted — earlier messages summarized")
+	for _, m := range msgs[atIndex:] {
+		s.Messages.Add(convID, m.Role, m.Content)
+	}
+
+	// Tell client to reload messages
+	newMsgs, _ := s.Messages.List(convID)
+	client.SendJSON(map[string]any{"type": "compact.done", "conversationId": convID, "messages": newMsgs})
+}
+
+func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language string) {
+	if language == "" {
+		language = "English"
+	}
+
+	// Find message content
+	msgs, _ := s.Messages.List(convID)
+	var content string
+	for _, m := range msgs {
+		if m.ID == messageID {
+			content = m.Content
+			break
+		}
+	}
+	if content == "" {
+		return
+	}
+
+	toolCtx := &llm.ToolContext{DB: s.DB}
+	if active := s.Providers.GetActive(); active != nil {
+		toolCtx.GatewayURL = active.APIBase
+		toolCtx.GatewayKey = active.APIKey
+	}
+	_, transModel := toolCtx.ResolveTaskModel("translation")
+
+	s.mu.RLock()
+	prov := s.Provider
+	s.mu.RUnlock()
+	if transModel == "" {
+		transModel = s.Model
+	}
+
+	prompt := []llm.ChatMessage{
+		{Role: "system", Content: "Translate the following text to " + language + ". Reply with ONLY the translation, nothing else."},
+		{Role: "user", Content: content},
+	}
+
+	prov.Stream(prompt, transModel, nil, func(ev llm.StreamEvent) {
+		if ev.Delta != "" {
+			client.SendJSON(map[string]any{"type": "translation.delta", "conversationId": convID, "messageId": messageID, "delta": ev.Delta})
+		}
+		if ev.Done {
+			client.SendJSON(map[string]any{"type": "translation.done", "conversationId": convID, "messageId": messageID})
+		}
+	})
 }
