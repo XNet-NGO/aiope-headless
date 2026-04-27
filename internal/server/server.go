@@ -52,6 +52,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/conversations/{id}", s.deleteConversation)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings/{key}", s.setSetting)
+	mux.HandleFunc("GET /api/settings/export", s.exportSettings)
+	mux.HandleFunc("POST /api/settings/import", s.importSettings)
 
 	// Provider routes
 	mux.HandleFunc("GET /api/providers", s.listProviders)
@@ -152,6 +154,102 @@ func (s *Server) setSetting(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	s.Settings.Set(key, req.Value)
 	w.WriteHeader(204)
+}
+
+func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
+	export := map[string]any{}
+	// Settings
+	all, _ := s.Settings.All()
+	export["settings"] = all
+	// Providers
+	ps, _ := s.Providers.List()
+	export["providers"] = ps
+	// Memories
+	rows, err := s.DB.Query("SELECT key,content,category FROM memories")
+	if err == nil {
+		defer rows.Close()
+		var mems []map[string]string
+		for rows.Next() {
+			var k, c, cat string
+			rows.Scan(&k, &c, &cat)
+			mems = append(mems, map[string]string{"key": k, "content": c, "category": cat})
+		}
+		export["memories"] = mems
+	}
+	// Tool toggles
+	trows, err := s.DB.Query("SELECT toolId, enabled FROM tool_toggles")
+	if err == nil {
+		defer trows.Close()
+		toggles := map[string]bool{}
+		for trows.Next() {
+			var id string
+			var en int
+			trows.Scan(&id, &en)
+			toggles[id] = en == 1
+		}
+		export["toolToggles"] = toggles
+	}
+	w.Header().Set("Content-Disposition", "attachment; filename=aiope-settings.json")
+	writeJSON(w, export)
+}
+
+func (s *Server) importSettings(w http.ResponseWriter, r *http.Request) {
+	var data map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "invalid JSON", 400)
+		return
+	}
+	// Import settings
+	if raw, ok := data["settings"]; ok {
+		var kv map[string]string
+		if json.Unmarshal(raw, &kv) == nil {
+			for k, v := range kv {
+				s.Settings.Set(k, v)
+			}
+		}
+	}
+	// Import providers
+	if raw, ok := data["providers"]; ok {
+		var ps []provider.Profile
+		if json.Unmarshal(raw, &ps) == nil {
+			for i := range ps {
+				s.Providers.Create(&ps[i])
+			}
+		}
+	}
+	// Import memories
+	if raw, ok := data["memories"]; ok {
+		var mems []struct {
+			Key, Content, Category string
+		}
+		if json.Unmarshal(raw, &mems) == nil {
+			now := time.Now().UnixMilli()
+			for _, m := range mems {
+				cat := m.Category
+				if cat == "" {
+					cat = "general"
+				}
+				s.DB.Exec("INSERT INTO memories(key,content,category,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET content=?,category=?,updatedAt=?",
+					m.Key, m.Content, cat, now, now, m.Content, cat, now)
+			}
+		}
+	}
+	// Import tool toggles
+	if raw, ok := data["toolToggles"]; ok {
+		var toggles map[string]bool
+		if json.Unmarshal(raw, &toggles) == nil {
+			for id, en := range toggles {
+				v := 0
+				if en {
+					v = 1
+				}
+				s.DB.Exec("INSERT INTO tool_toggles(toolId,enabled) VALUES(?,?) ON CONFLICT(toolId) DO UPDATE SET enabled=?", id, v, v)
+			}
+		}
+	}
+	s.refreshProvider()
+	w.WriteHeader(200)
+	writeJSON(w, map[string]string{"status": "imported"})
 }
 
 // WebSocket handler
