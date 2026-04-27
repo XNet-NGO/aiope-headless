@@ -58,6 +58,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/providers/{id}/activate", s.activateProvider)
 	mux.HandleFunc("GET /api/providers/{id}/models", s.fetchModels)
 
+	// Tool toggles
+	mux.HandleFunc("GET /api/tools", s.listToolToggles)
+	mux.HandleFunc("PUT /api/tools/{id}", s.setToolToggle)
+
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
 
@@ -251,17 +255,8 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
 	}
 
-	// Determine tools (PLAN mode = no write tools)
-	tools := llm.BuiltinTools
-	if mode == "plan" {
-		var readOnly []llm.ToolDef
-		for _, t := range tools {
-			if t.Name != "run_sh" && t.Name != "write_file" {
-				readOnly = append(readOnly, t)
-			}
-		}
-		tools = readOnly
-	}
+	// Determine tools (PLAN mode = no write tools, respect toggles)
+	tools := s.getEnabledTools(mode)
 
 	// Stream response via orchestrator
 	assistantID := uuid.NewString()
@@ -469,6 +464,44 @@ func (s *Server) fetchModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, models)
 }
 
+func (s *Server) listToolToggles(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.DB.Query("SELECT toolId, enabled FROM tool_toggles")
+	if err != nil {
+		writeJSON(w, map[string]any{})
+		return
+	}
+	defer rows.Close()
+	toggles := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var enabled int
+		rows.Scan(&id, &enabled)
+		toggles[id] = enabled == 1
+	}
+	// Include all builtin tools with defaults
+	result := make([]map[string]any, 0, len(llm.BuiltinTools))
+	for _, t := range llm.BuiltinTools {
+		enabled := true
+		if v, ok := toggles[t.Name]; ok {
+			enabled = v
+		}
+		result = append(result, map[string]any{"id": t.Name, "name": t.Name, "description": t.Description, "enabled": enabled})
+	}
+	writeJSON(w, result)
+}
+
+func (s *Server) setToolToggle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct{ Enabled bool }
+	json.NewDecoder(r.Body).Decode(&req)
+	enabled := 0
+	if req.Enabled {
+		enabled = 1
+	}
+	s.DB.Exec("INSERT INTO tool_toggles(toolId,enabled) VALUES(?,?) ON CONFLICT(toolId) DO UPDATE SET enabled=?", id, enabled, enabled)
+	w.WriteHeader(204)
+}
+
 func (s *Server) refreshProvider() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -514,16 +547,7 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 		model = "gpt-4o"
 	}
 
-	tools := llm.BuiltinTools
-	if mode == "plan" {
-		var ro []llm.ToolDef
-		for _, t := range tools {
-			if t.Name != "run_sh" && t.Name != "write_file" {
-				ro = append(ro, t)
-			}
-		}
-		tools = ro
-	}
+	tools := s.getEnabledTools(mode)
 
 	var gwURL, gwKey string
 	if active := s.Providers.GetActive(); active != nil {
@@ -553,6 +577,31 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 		},
 	}
 	return orch.Run(chatMsgs)
+}
+
+func (s *Server) getEnabledTools(mode string) []llm.ToolDef {
+	// Load toggles from DB
+	disabled := map[string]bool{}
+	rows, err := s.DB.Query("SELECT toolId FROM tool_toggles WHERE enabled=0")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			rows.Scan(&id)
+			disabled[id] = true
+		}
+	}
+	var tools []llm.ToolDef
+	for _, t := range llm.BuiltinTools {
+		if disabled[t.Name] {
+			continue
+		}
+		if mode == "plan" && (t.Name == "run_sh" || t.Name == "write_file") {
+			continue
+		}
+		tools = append(tools, t)
+	}
+	return tools
 }
 
 func (s *Server) buildHistory(convID, mode string) []llm.ChatMessage {
