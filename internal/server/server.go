@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -181,21 +184,22 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var msg struct {
-			Type           string `json:"type"`
-			ConversationID string `json:"conversationId"`
-			Content        string `json:"content"`
-			Mode           string `json:"mode"`
-			MessageID      string `json:"messageId"`
-			AtIndex        int    `json:"atIndex"`
-			Language       string `json:"language"`
-			Text           string `json:"text"`
+			Type           string   `json:"type"`
+			ConversationID string   `json:"conversationId"`
+			Content        string   `json:"content"`
+			Mode           string   `json:"mode"`
+			MessageID      string   `json:"messageId"`
+			AtIndex        int      `json:"atIndex"`
+			Language       string   `json:"language"`
+			Text           string   `json:"text"`
+			ImagePaths     []string `json:"imagePaths"`
 		}
 		if json.Unmarshal(data, &msg) != nil {
 			continue
 		}
 		switch msg.Type {
 		case "chat.send":
-			go s.handleChatSend(ctx, client, msg.ConversationID, msg.Content, msg.Mode)
+			go s.handleChatSend(ctx, client, msg.ConversationID, msg.Content, msg.Mode, msg.ImagePaths)
 		case "chat.retry":
 			go s.handleRetry(ctx, client, msg.ConversationID, msg.AtIndex, msg.Mode)
 		case "chat.edit_resend":
@@ -221,8 +225,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, content, mode string) {
-	log.Printf("chat.send: conv=%s content=%q mode=%s", convID, content, mode)
+func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, content, mode string, imagePaths []string) {
+	log.Printf("chat.send: conv=%s content=%q mode=%s images=%d", convID, content, mode, len(imagePaths))
 	// Create conversation if needed
 	if convID == "" {
 		c, err := s.Conversations.Create("New Chat")
@@ -253,6 +257,26 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: sysPrompt})
 	for _, m := range msgs {
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
+	}
+
+	// Attach images to last user message as multimodal content
+	if len(imagePaths) > 0 && len(chatMsgs) > 0 {
+		last := &chatMsgs[len(chatMsgs)-1]
+		if last.Role == "user" {
+			parts := []any{map[string]any{"type": "text", "text": last.Content}}
+			for _, img := range imagePaths {
+				b64, err := encodeImageBase64(img)
+				if err != nil {
+					log.Printf("image encode error: %v", err)
+					continue
+				}
+				parts = append(parts, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]any{"url": "data:image/jpeg;base64," + b64},
+				})
+			}
+			last.Content = parts
+		}
 	}
 
 	// Determine tools (PLAN mode = no write tools, respect toggles)
@@ -341,7 +365,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 			}
 			if cnt < 20 {
 				s.autoRunCount.Store(convID, cnt+1)
-				go s.handleChatSend(ctx, client, convID, "continue", mode)
+				go s.handleChatSend(ctx, client, convID, "continue", mode, nil)
 				return
 			}
 			s.autoRunCount.Delete(convID)
@@ -506,6 +530,26 @@ func (s *Server) refreshProvider() {
 		s.Provider = &llm.OpenAI{APIKey: p.APIKey, APIBase: p.APIBase}
 		s.Model = p.SelectedModelID
 	}
+}
+
+func encodeImageBase64(path string) (string, error) {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		resp, err := http.Get(path)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+		if err != nil {
+			return "", err
+		}
+		return base64.StdEncoding.EncodeToString(data), nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
