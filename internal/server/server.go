@@ -34,6 +34,8 @@ type Server struct {
 	DB            *sql.DB
 	mu            sync.RWMutex
 	cancels       sync.Map // conversationId -> context.CancelFunc
+	autoRun       sync.Map // conversationId -> bool
+	autoRunCount  sync.Map // conversationId -> int
 }
 
 func (s *Server) Handler() http.Handler {
@@ -205,6 +207,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if fn, ok := s.cancels.LoadAndDelete(msg.ConversationID); ok {
 				fn.(context.CancelFunc)()
 			}
+		case "chat.auto_run":
+			enabled := msg.Content == "true" || msg.Content == "1"
+			s.autoRun.Store(msg.ConversationID, enabled)
+			if !enabled {
+				s.autoRunCount.Delete(msg.ConversationID)
+			}
 		}
 	}
 }
@@ -281,6 +289,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		gwKey = active.APIKey
 	}
 
+	var hadToolCalls bool
 	orch := &llm.Orchestrator{
 		Provider: prov,
 		Model:    model,
@@ -295,6 +304,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 				s.Hub.BroadcastJSON(map[string]any{"type": "stream.reasoning", "conversationId": convID, "messageId": assistantID, "delta": ev.Reasoning})
 			}
 			if len(ev.ToolCalls) > 0 {
+				hadToolCalls = true
 				for _, tc := range ev.ToolCalls {
 					s.Hub.BroadcastJSON(map[string]any{"type": "stream.tool_call", "conversationId": convID, "messageId": assistantID, "toolCall": tc})
 				}
@@ -329,6 +339,24 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	// Auto-title after first exchange
 	if len(msgs) <= 1 {
 		go s.autoTitle(convID, content)
+	}
+
+	// Auto-run: continue after tool use
+	if hadToolCalls {
+		if on, ok := s.autoRun.Load(convID); ok && on.(bool) {
+			cnt := 0
+			if v, ok := s.autoRunCount.Load(convID); ok {
+				cnt = v.(int)
+			}
+			if cnt < 20 {
+				s.autoRunCount.Store(convID, cnt+1)
+				go s.handleChatSend(ctx, client, convID, "continue", mode)
+				return
+			}
+			s.autoRunCount.Delete(convID)
+		}
+	} else {
+		s.autoRunCount.Delete(convID)
 	}
 }
 
