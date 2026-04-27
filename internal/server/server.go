@@ -65,6 +65,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tools", s.listToolToggles)
 	mux.HandleFunc("PUT /api/tools/{id}", s.setToolToggle)
 
+	// Memories
+	mux.HandleFunc("GET /api/memories", s.listMemories)
+	mux.HandleFunc("POST /api/memories", s.createMemory)
+	mux.HandleFunc("PUT /api/memories/{key}", s.updateMemory)
+	mux.HandleFunc("DELETE /api/memories/{key}", s.deleteMemory)
+
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
 
@@ -519,6 +525,68 @@ func (s *Server) setToolToggle(w http.ResponseWriter, r *http.Request) {
 		enabled = 1
 	}
 	s.DB.Exec("INSERT INTO tool_toggles(toolId,enabled) VALUES(?,?) ON CONFLICT(toolId) DO UPDATE SET enabled=?", id, enabled, enabled)
+	w.WriteHeader(204)
+}
+
+func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.DB.Query("SELECT key,content,category,createdAt,updatedAt FROM memories ORDER BY updatedAt DESC")
+	if err != nil {
+		writeJSON(w, []any{})
+		return
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var key, content, cat string
+		var created, updated int64
+		rows.Scan(&key, &content, &cat, &created, &updated)
+		out = append(out, map[string]any{"key": key, "content": content, "category": cat, "createdAt": created, "updatedAt": updated})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key      string `json:"key"`
+		Content  string `json:"content"`
+		Category string `json:"category"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.Key == "" || req.Content == "" {
+		http.Error(w, "key and content required", 400)
+		return
+	}
+	if req.Category == "" {
+		req.Category = "general"
+	}
+	now := time.Now().UnixMilli()
+	s.DB.Exec("INSERT INTO memories(key,content,category,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET content=?,category=?,updatedAt=?",
+		req.Key, req.Content, req.Category, now, now, req.Content, req.Category, now)
+	w.WriteHeader(201)
+	writeJSON(w, map[string]any{"key": req.Key, "content": req.Content, "category": req.Category})
+}
+
+func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	var req struct {
+		Content  string `json:"content"`
+		Category string `json:"category"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	now := time.Now().UnixMilli()
+	if req.Category != "" {
+		s.DB.Exec("UPDATE memories SET content=?,category=?,updatedAt=? WHERE key=?", req.Content, req.Category, now, key)
+	} else {
+		s.DB.Exec("UPDATE memories SET content=?,updatedAt=? WHERE key=?", req.Content, now, key)
+	}
+	w.WriteHeader(204)
+}
+
+func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
+	s.DB.Exec("DELETE FROM memories WHERE key=?", r.PathValue("key"))
 	w.WriteHeader(204)
 }
 
