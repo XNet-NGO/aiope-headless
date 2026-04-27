@@ -33,6 +33,7 @@ type Server struct {
 	WebFS         fs.FS
 	DB            *sql.DB
 	mu            sync.RWMutex
+	cancels       sync.Map // conversationId -> context.CancelFunc
 }
 
 func (s *Server) Handler() http.Handler {
@@ -201,7 +202,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "chat.translate":
 			go s.handleTranslate(client, msg.ConversationID, msg.MessageID, msg.Language)
 		case "chat.cancel":
-			// TODO: cancellation
+			if fn, ok := s.cancels.LoadAndDelete(msg.ConversationID); ok {
+				fn.(context.CancelFunc)()
+			}
 		}
 	}
 }
@@ -256,6 +259,13 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	assistantID := uuid.NewString()
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	s.cancels.Store(convID, streamCancel)
+	defer func() {
+		streamCancel()
+		s.cancels.Delete(convID)
+	}()
+
 	s.mu.RLock()
 	prov := s.Provider
 	model := s.Model
@@ -275,6 +285,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		Provider: prov,
 		Model:    model,
 		Tools:    tools,
+		Ctx:      streamCtx,
 		ToolCtx:  &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {
@@ -457,6 +468,13 @@ func ListenAndServe(bind string, port int, handler http.Handler) error {
 func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, error) {
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancels.Store(convID, cancel)
+	defer func() {
+		cancel()
+		s.cancels.Delete(convID)
+	}()
+
 	s.mu.RLock()
 	prov := s.Provider
 	model := s.Model
@@ -483,7 +501,7 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 	}
 
 	orch := &llm.Orchestrator{
-		Provider: prov, Model: model, Tools: tools,
+		Provider: prov, Model: model, Tools: tools, Ctx: ctx,
 		ToolCtx: &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {

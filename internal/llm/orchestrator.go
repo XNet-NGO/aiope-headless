@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,16 +15,28 @@ type Orchestrator struct {
 	Tools    []ToolDef
 	ToolCtx  *ToolContext
 	OnEvent  func(StreamEvent)
+	Ctx      context.Context
 }
 
 func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 	raw := make([]ChatMessage, len(messages))
 	copy(raw, messages)
 
+	ctx := o.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	var fullContent strings.Builder
 	var fullReasoning strings.Builder
 
-	for round := 0; round < 50; round++ {
+	for round := 0; round < 140; round++ {
+		select {
+		case <-ctx.Done():
+			o.OnEvent(StreamEvent{Done: true, FinishReason: "cancelled"})
+			return fullContent.String(), nil
+		default:
+		}
 		// Trim older tool results (keep last 3 full, truncate older to 500 chars)
 		trimToolResults(raw)
 
