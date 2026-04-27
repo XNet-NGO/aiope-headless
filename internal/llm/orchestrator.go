@@ -180,6 +180,11 @@ func trimToolResults(msgs []ChatMessage) {
 	}
 }
 
+// EstimateTokens approximates token count (~4 chars per token for English).
+func EstimateTokens(s string) int {
+	return (len(s) + 3) / 4
+}
+
 // MarshalJSON for ChatMessage to handle nil content for tool_calls messages
 func (m ChatMessage) MarshalJSON() ([]byte, error) {
 	type Alias ChatMessage

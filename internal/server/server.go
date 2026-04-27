@@ -358,6 +358,9 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	} else {
 		s.autoRunCount.Delete(convID)
 	}
+
+	// Auto-compact: check if context exceeds 95% of token limit
+	s.maybeAutoCompact(client, convID)
 }
 
 func (s *Server) autoTitle(convID, userMsg string) {
@@ -724,6 +727,34 @@ func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
 	// Tell client to reload messages
 	newMsgs, _ := s.Messages.List(convID)
 	client.SendJSON(map[string]any{"type": "compact.done", "conversationId": convID, "messages": newMsgs})
+}
+
+func (s *Server) maybeAutoCompact(client *ws.Client, convID string) {
+	// Check if auto_compact is enabled in settings
+	v, _ := s.Settings.Get("auto_compact")
+	if v != "true" && v != "1" {
+		return
+	}
+	// Get context token limit from active model config
+	contextTokens := 128000
+	if p := s.Providers.GetActive(); p != nil {
+		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok && mc.ContextTokens > 0 {
+			contextTokens = mc.ContextTokens
+		}
+	}
+	msgs, _ := s.Messages.List(convID)
+	if len(msgs) <= 4 {
+		return
+	}
+	total := 0
+	for _, m := range msgs {
+		total += llm.EstimateTokens(m.Content)
+	}
+	threshold := contextTokens * 95 / 100
+	if total > threshold {
+		log.Printf("auto-compact: %d tokens > %d threshold, compacting conv %s", total, threshold, convID)
+		s.handleCompact(client, convID, len(msgs)/2)
+	}
 }
 
 func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language string) {
