@@ -2,6 +2,7 @@ package llm
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +18,7 @@ import (
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
 	"search_web": true, "search_images": true, "query_data": true,
-	"memory_recall": true, "ssh_exec": true,
+	"memory_recall": true, "ssh_exec": true, "analyze_image": true,
 }
 
 var BuiltinTools = []ToolDef{
@@ -146,6 +147,17 @@ var BuiltinTools = []ToolDef{
 		},
 	},
 	{
+		Name: "analyze_image", Description: "Analyze an image from a URL or local file path using vision. Returns a description or answers a question about the image.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url":      map[string]any{"type": "string", "description": "URL or local file path of the image to analyze"},
+				"question": map[string]any{"type": "string", "description": "What to look for or ask about the image"},
+			},
+			"required": []string{"url"},
+		},
+	},
+	{
 		Name: "ssh_start", Description: "Open persistent SSH session to a remote server. Resolves from ~/.ssh/config or connects by hostname. Returns connection status.",
 		Parameters: map[string]any{
 			"type": "object",
@@ -211,11 +223,12 @@ func (ctx *ToolContext) fileReadLim() int {
 
 // Task model resolution — different models for different tasks
 var TaskModelDefaults = map[string]string{
-	"title":       "google-ai-studio/models-gemma-3-1b-it",
-	"summary":     "google-ai-studio/models-gemma-3-27b-it",
-	"image_gen":   "pollinations-pollen/klein",
-	"subagent":    "google-ai-studio/models-gemma-4-26b-a4b-it",
-	"translation": "google-ai-studio/models-gemma-3-12b-it",
+	"title":             "google-ai-studio/models-gemma-3-1b-it",
+	"summary":           "google-ai-studio/models-gemma-3-27b-it",
+	"image_gen":         "pollinations-pollen/klein",
+	"image_recognition": "google-ai-studio/models-gemma-3-27b-it",
+	"subagent":          "google-ai-studio/models-gemma-4-26b-a4b-it",
+	"translation":       "google-ai-studio/models-gemma-3-12b-it",
 }
 
 func (ctx *ToolContext) ResolveTaskModel(task string) (string, string) {
@@ -362,6 +375,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 	case "image_generate":
 		return generateImage(ctx, str("prompt"))
 
+	case "analyze_image":
+		return analyzeImage(ctx, str("url"), str("question"))
+
 	case "ssh_start":
 		server := str("server")
 		client, err := sshConnect(server)
@@ -457,4 +473,67 @@ func generateImage(ctx *ToolContext, prompt string) (string, error) {
 		return fmt.Sprintf("Image generated!\n![generated image](%s)", result.Data[0].URL), nil
 	}
 	return "", fmt.Errorf("no image in response: %s", string(data)[:200])
+}
+
+func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
+	if imgURL == "" {
+		return "", fmt.Errorf("url required")
+	}
+	if question == "" {
+		question = "Describe this image in detail."
+	}
+
+	// Fetch image and base64 encode
+	var imgData []byte
+	var err error
+	if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Get(imgURL)
+		if err != nil {
+			return "", fmt.Errorf("fetch image: %v", err)
+		}
+		defer resp.Body.Close()
+		imgData, err = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+		if err != nil {
+			return "", fmt.Errorf("read image: %v", err)
+		}
+	} else {
+		imgData, err = os.ReadFile(imgURL)
+		if err != nil {
+			return "", fmt.Errorf("read file: %v", err)
+		}
+	}
+	b64 := base64.StdEncoding.EncodeToString(imgData)
+
+	// Resolve vision model
+	gwURL, model := ctx.ResolveTaskModel("image_recognition")
+	if model == "" {
+		gwURL = ctx.GatewayURL
+		model = "google-ai-studio/models-gemma-3-27b-it"
+	}
+
+	// Build multimodal message
+	msgs := []ChatMessage{{
+		Role: "user",
+		Content: []any{
+			map[string]any{"type": "text", "text": question},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + b64}},
+		},
+	}}
+
+	prov := &OpenAI{APIKey: ctx.GatewayKey, APIBase: gwURL}
+	var result strings.Builder
+	err = prov.Stream(msgs, model, nil, func(ev StreamEvent) {
+		if ev.Delta != "" {
+			result.WriteString(ev.Delta)
+		}
+	})
+	if err != nil {
+		return "", fmt.Errorf("vision: %v", err)
+	}
+	text := result.String()
+	if text == "" {
+		return "No description returned.", nil
+	}
+	return fmt.Sprintf("Image analysis complete.\nSource: %s\nResult: %s", imgURL, text), nil
 }
