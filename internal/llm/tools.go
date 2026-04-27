@@ -19,6 +19,7 @@ var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
 	"search_web": true, "search_images": true, "query_data": true,
 	"memory_recall": true, "ssh_exec": true, "analyze_image": true,
+	"task": true,
 }
 
 var BuiltinTools = []ToolDef{
@@ -144,6 +145,17 @@ var BuiltinTools = []ToolDef{
 				"prompt": map[string]any{"type": "string", "description": "Detailed image generation prompt"},
 			},
 			"required": []string{"prompt"},
+		},
+	},
+	{
+		Name: "task", Description: "Delegate a research task to a subagent. The subagent has read-only tools (search, read, fetch) and returns a summary. Use for parallel research.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"description": map[string]any{"type": "string", "description": "Brief description of the research task"},
+				"prompt":      map[string]any{"type": "string", "description": "Detailed prompt for the subagent"},
+			},
+			"required": []string{"description", "prompt"},
 		},
 	},
 	{
@@ -379,6 +391,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 	case "analyze_image":
 		return analyzeImage(ctx, str("url"), str("question"))
 
+	case "task":
+		return executeTask(ctx, str("description"), str("prompt"))
+
 	case "ssh_start":
 		server := str("server")
 		client, err := sshConnect(server)
@@ -542,4 +557,61 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 		return "No description returned.", nil
 	}
 	return fmt.Sprintf("Image analysis complete.\nSource: %s\nResult: %s", imgURL, text), nil
+}
+
+var subagentReadOnly = map[string]bool{
+	"search_web": true, "search_images": true, "fetch_url": true,
+	"read_file": true, "list_directory": true, "query_data": true,
+	"memory_recall": true,
+}
+
+func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
+	if prompt == "" {
+		return "", fmt.Errorf("prompt required")
+	}
+
+	// Resolve subagent model
+	gwURL, model := ctx.ResolveTaskModel("subagent")
+	if model == "" {
+		gwURL = ctx.GatewayURL
+		model = "google-ai-studio/models-gemma-4-26b-a4b-it"
+	}
+
+	// Build read-only tool set
+	var tools []ToolDef
+	for _, t := range BuiltinTools {
+		if subagentReadOnly[t.Name] {
+			tools = append(tools, t)
+		}
+	}
+
+	// Build subagent context (read-only)
+	subCtx := &ToolContext{
+		DB:         ctx.DB,
+		GatewayURL: ctx.GatewayURL,
+		GatewayKey: ctx.GatewayKey,
+	}
+
+	msgs := []ChatMessage{
+		{Role: "system", Content: "You are a research subagent. Use your tools to search, read, and explore. Summarize your findings concisely. Do not ask questions."},
+		{Role: "user", Content: prompt},
+	}
+
+	prov := &OpenAI{APIKey: ctx.GatewayKey, APIBase: gwURL}
+	orch := &Orchestrator{
+		Provider: prov,
+		Model:    model,
+		Tools:    tools,
+		ToolCtx:  subCtx,
+		OnEvent:  func(ev StreamEvent) {}, // silent
+	}
+
+	result, err := orch.Run(msgs)
+	if err != nil {
+		return fmt.Sprintf("<task_error>%s</task_error>", err.Error()), nil
+	}
+	if result == "" {
+		return "<task_result>No results found.</task_result>", nil
+	}
+	return fmt.Sprintf("<task_result>\n%s\n</task_result>", result), nil
 }
