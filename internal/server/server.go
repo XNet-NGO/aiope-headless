@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/conversations/{id}", s.getConversation)
 	mux.HandleFunc("PATCH /api/conversations/{id}", s.updateConversation)
 	mux.HandleFunc("DELETE /api/conversations/{id}", s.deleteConversation)
+	mux.HandleFunc("GET /api/conversations/{id}/export", s.exportConversation)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings/{key}", s.setSetting)
 	mux.HandleFunc("GET /api/settings/export", s.exportSettings)
@@ -141,6 +142,40 @@ func (s *Server) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	s.Conversations.Delete(id)
 	s.Hub.BroadcastJSON(map[string]any{"type": "conversation.deleted", "id": id})
 	w.WriteHeader(204)
+}
+
+func (s *Server) exportConversation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	conv, err := s.Conversations.Get(id)
+	if err != nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	msgs, _ := s.Messages.List(id)
+	format := r.URL.Query().Get("format")
+	if format == "text" || format == "md" {
+		w.Header().Set("Content-Type", "text/markdown")
+		var b strings.Builder
+		fmt.Fprintf(&b, "# %s\n\n", conv.Title)
+		for _, m := range msgs {
+			switch m.Role {
+			case "user":
+				fmt.Fprintf(&b, "## User\n\n%s\n\n", m.Content)
+			case "assistant":
+				fmt.Fprintf(&b, "## Assistant\n\n%s\n\n", m.Content)
+			default:
+				fmt.Fprintf(&b, "> _%s: %s_\n\n", m.Role, m.Content)
+			}
+		}
+		w.Write([]byte(b.String()))
+		return
+	}
+	// Default: JSON
+	writeJSON(w, map[string]any{
+		"title":    conv.Title,
+		"exported": time.Now().UnixMilli(),
+		"messages": msgs,
+	})
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
