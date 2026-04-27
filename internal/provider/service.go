@@ -12,12 +12,19 @@ import (
 )
 
 type ModelConfig struct {
-	ModelID         string   `json:"modelId"`
-	ToolsOverride   *bool    `json:"toolsOverride,omitempty"`
-	Temperature     *float64 `json:"temperature,omitempty"`
-	MaxTokens       *int     `json:"maxTokens,omitempty"`
-	ContextTokens   int      `json:"contextTokens"`
-	ReasoningEffort *string  `json:"reasoningEffort,omitempty"`
+	ModelID          string   `json:"modelId"`
+	ToolsOverride    *bool    `json:"toolsOverride,omitempty"`
+	VisionOverride   *bool    `json:"visionOverride,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
+	TopP             *float64 `json:"topP,omitempty"`
+	TopK             *int     `json:"topK,omitempty"`
+	MaxTokens        *int     `json:"maxTokens,omitempty"`
+	ContextTokens    int      `json:"contextTokens"`
+	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
+	AutoCompact      bool     `json:"autoCompact,omitempty"`
+	ShellOutputLimit int      `json:"shellOutputLimit,omitempty"`
+	FetchLimit       int      `json:"fetchLimit,omitempty"`
+	FileReadLimit    int      `json:"fileReadLimit,omitempty"`
 }
 
 type Profile struct {

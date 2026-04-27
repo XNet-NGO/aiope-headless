@@ -180,9 +180,33 @@ var BuiltinTools = []ToolDef{
 }
 
 type ToolContext struct {
-	DB         *sql.DB
-	GatewayURL string
-	GatewayKey string
+	DB               *sql.DB
+	GatewayURL       string
+	GatewayKey       string
+	ShellOutputLimit int
+	FetchLimit       int
+	FileReadLimit    int
+}
+
+func (ctx *ToolContext) shellLimit() int {
+	if ctx.ShellOutputLimit > 0 {
+		return ctx.ShellOutputLimit
+	}
+	return 8000
+}
+
+func (ctx *ToolContext) fetchLim() int {
+	if ctx.FetchLimit > 0 {
+		return ctx.FetchLimit
+	}
+	return 12000
+}
+
+func (ctx *ToolContext) fileReadLim() int {
+	if ctx.FileReadLimit > 0 {
+		return ctx.FileReadLimit
+	}
+	return 50000
 }
 
 // Task model resolution — different models for different tasks
@@ -219,8 +243,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		cmd.Env = os.Environ()
 		out, err := cmd.CombinedOutput()
 		result := string(out)
-		if len(result) > 4000 {
-			result = result[:4000] + "\n...(truncated)"
+		lim := ctx.shellLimit()
+		if len(result) > lim {
+			result = result[:lim] + "\n...(truncated)"
 		}
 		if err != nil && result == "" {
 			return "", fmt.Errorf("command failed: %v", err)
@@ -233,8 +258,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 			return "", err
 		}
 		s := string(data)
-		if len(s) > 50000 {
-			s = s[:50000] + "\n...(truncated)"
+		lim := ctx.fileReadLim()
+		if len(s) > lim {
+			s = s[:lim] + "\n...(truncated)"
 		}
 		return s, nil
 
@@ -268,7 +294,8 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 			return "", err
 		}
 		defer resp.Body.Close()
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 12000))
+		lim := ctx.fetchLim()
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(lim)))
 		return string(data), nil
 
 	case "search_web":

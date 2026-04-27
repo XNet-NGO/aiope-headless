@@ -278,11 +278,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	}
 
 	// Get gateway info for search/query tools
-	var gwURL, gwKey string
-	if active := s.Providers.GetActive(); active != nil {
-		gwURL = active.APIBase
-		gwKey = active.APIKey
-	}
+	toolCtx := s.buildToolContext()
 
 	var hadToolCalls bool
 	orch := &llm.Orchestrator{
@@ -290,7 +286,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		Model:    model,
 		Tools:    tools,
 		Ctx:      streamCtx,
-		ToolCtx:  &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
+		ToolCtx:  toolCtx,
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {
 				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
@@ -549,15 +545,9 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 
 	tools := s.getEnabledTools(mode)
 
-	var gwURL, gwKey string
-	if active := s.Providers.GetActive(); active != nil {
-		gwURL = active.APIBase
-		gwKey = active.APIKey
-	}
-
 	orch := &llm.Orchestrator{
 		Provider: prov, Model: model, Tools: tools, Ctx: ctx,
-		ToolCtx: &llm.ToolContext{DB: s.DB, GatewayURL: gwURL, GatewayKey: gwKey},
+		ToolCtx: s.buildToolContext(),
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {
 				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
@@ -577,6 +567,20 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 		},
 	}
 	return orch.Run(chatMsgs)
+}
+
+func (s *Server) buildToolContext() *llm.ToolContext {
+	tc := &llm.ToolContext{DB: s.DB}
+	if p := s.Providers.GetActive(); p != nil {
+		tc.GatewayURL = p.APIBase
+		tc.GatewayKey = p.APIKey
+		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok {
+			tc.ShellOutputLimit = mc.ShellOutputLimit
+			tc.FetchLimit = mc.FetchLimit
+			tc.FileReadLimit = mc.FileReadLimit
+		}
+	}
+	return tc
 }
 
 func (s *Server) getEnabledTools(mode string) []llm.ToolDef {
