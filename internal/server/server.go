@@ -17,6 +17,7 @@ import (
 
 	"github.com/XNet-NGO/AIOPE-Headless/internal/conversation"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/llm"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/mcp"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
@@ -35,6 +36,7 @@ type Server struct {
 	Model         string
 	WebFS         fs.FS
 	DB            *sql.DB
+	MCP           *mcp.Manager
 	mu            sync.RWMutex
 	cancels       sync.Map // conversationId -> context.CancelFunc
 	autoRun       sync.Map // conversationId -> bool
@@ -73,6 +75,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/memories", s.createMemory)
 	mux.HandleFunc("PUT /api/memories/{key}", s.updateMemory)
 	mux.HandleFunc("DELETE /api/memories/{key}", s.deleteMemory)
+
+	// MCP servers
+	mux.HandleFunc("GET /api/mcp/servers", s.listMcpServers)
+	mux.HandleFunc("POST /api/mcp/servers", s.addMcpServer)
+	mux.HandleFunc("PUT /api/mcp/servers/{id}", s.updateMcpServer)
+	mux.HandleFunc("DELETE /api/mcp/servers/{id}", s.deleteMcpServer)
+	mux.HandleFunc("POST /api/mcp/servers/{id}/connect", s.connectMcpServer)
 
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
@@ -723,6 +732,63 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (s *Server) listMcpServers(w http.ResponseWriter, r *http.Request) {
+	servers := s.MCP.ListServers()
+	if servers == nil {
+		servers = []mcp.ServerConfig{}
+	}
+	writeJSON(w, servers)
+}
+
+func (s *Server) addMcpServer(w http.ResponseWriter, r *http.Request) {
+	var srv mcp.ServerConfig
+	json.NewDecoder(r.Body).Decode(&srv)
+	if srv.ID == "" {
+		srv.ID = uuid.NewString()[:8]
+	}
+	if srv.Status == "" {
+		srv.Status = "idle"
+	}
+	s.MCP.SaveServer(&srv)
+	w.WriteHeader(201)
+	writeJSON(w, srv)
+}
+
+func (s *Server) updateMcpServer(w http.ResponseWriter, r *http.Request) {
+	var srv mcp.ServerConfig
+	json.NewDecoder(r.Body).Decode(&srv)
+	srv.ID = r.PathValue("id")
+	s.MCP.SaveServer(&srv)
+	w.WriteHeader(204)
+}
+
+func (s *Server) deleteMcpServer(w http.ResponseWriter, r *http.Request) {
+	s.MCP.DeleteServer(r.PathValue("id"))
+	w.WriteHeader(204)
+}
+
+func (s *Server) connectMcpServer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	servers := s.MCP.ListServers()
+	var srv *mcp.ServerConfig
+	for i := range servers {
+		if servers[i].ID == id {
+			srv = &servers[i]
+			break
+		}
+	}
+	if srv == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	tools, err := s.MCP.DiscoverTools(*srv)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	writeJSON(w, map[string]any{"tools": tools, "count": len(tools)})
+}
+
 func (s *Server) refreshProvider() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -825,6 +891,9 @@ func (s *Server) buildToolContext() *llm.ToolContext {
 			tc.FileReadLimit = mc.FileReadLimit
 		}
 	}
+	if s.MCP != nil {
+		tc.McpExecutor = s.MCP.ExecuteTool
+	}
 	return tc
 }
 
@@ -849,6 +918,15 @@ func (s *Server) getEnabledTools(mode string) []llm.ToolDef {
 			continue
 		}
 		tools = append(tools, t)
+	}
+	// Add MCP tools
+	if s.MCP != nil {
+		for _, mt := range s.MCP.GetToolDefs() {
+			if disabled[mt.Name] {
+				continue
+			}
+			tools = append(tools, llm.ToolDef{Name: mt.Name, Description: mt.Description, Parameters: mt.InputSchema})
+		}
 	}
 	return tools
 }

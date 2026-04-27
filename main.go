@@ -11,6 +11,7 @@ import (
 	"github.com/XNet-NGO/AIOPE-Headless/internal/conversation"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/db"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/llm"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/mcp"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/server"
@@ -57,6 +58,7 @@ func main() {
 		Model:         model,
 		WebFS:         webFS,
 		DB:            database,
+		MCP:           mcp.NewManager(database),
 	}
 
 	log.Fatal(server.ListenAndServe(cfg.Bind, cfg.Port, srv.Handler()))

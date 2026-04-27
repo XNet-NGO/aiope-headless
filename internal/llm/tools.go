@@ -198,6 +198,7 @@ type ToolContext struct {
 	ShellOutputLimit int
 	FetchLimit       int
 	FileReadLimit    int
+	McpExecutor      func(name string, args map[string]any) (string, bool) // returns result, handled
 }
 
 func (ctx *ToolContext) shellLimit() int {
@@ -401,6 +402,11 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		return fmt.Sprintf(`{"status":"disconnected","server":"%s"}`, server), nil
 
 	default:
+		if ctx.McpExecutor != nil {
+			if result, handled := ctx.McpExecutor(name, args); handled {
+				return result, nil
+			}
+		}
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 }
