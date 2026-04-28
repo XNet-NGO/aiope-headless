@@ -53,3 +53,19 @@ CREATE TABLE IF NOT EXISTS settings_kv (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS remote_servers (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    host          TEXT NOT NULL,
+    port          INTEGER NOT NULL DEFAULT 2222,
+    user          TEXT NOT NULL DEFAULT 'root',
+    bootstrapPort INTEGER NOT NULL DEFAULT 22,
+    keyPath       TEXT NOT NULL DEFAULT '',
+    privateKey    TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'offline',
+    osInfo        TEXT NOT NULL DEFAULT '',
+    daemonVersion TEXT NOT NULL DEFAULT '',
+    lastSeen      INTEGER NOT NULL DEFAULT 0,
+    createdAt     INTEGER NOT NULL
+);

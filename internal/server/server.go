@@ -1,16 +1,21 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +25,7 @@ import (
 	"github.com/XNet-NGO/AIOPE-Headless/internal/mcp"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/remote"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/ws"
 	"github.com/coder/websocket"
@@ -37,6 +43,7 @@ type Server struct {
 	WebFS         fs.FS
 	DB            *sql.DB
 	MCP           *mcp.Manager
+	Remote        *remote.Service
 	mu            sync.RWMutex
 	cancels       sync.Map // conversationId -> context.CancelFunc
 	autoRun       sync.Map // conversationId -> bool
@@ -82,6 +89,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/mcp/servers/{id}", s.updateMcpServer)
 	mux.HandleFunc("DELETE /api/mcp/servers/{id}", s.deleteMcpServer)
 	mux.HandleFunc("POST /api/mcp/servers/{id}/connect", s.connectMcpServer)
+
+	// Remote servers
+	mux.HandleFunc("GET /api/remote/servers", s.listRemoteServers)
+	mux.HandleFunc("POST /api/remote/servers", s.createRemoteServer)
+	mux.HandleFunc("PUT /api/remote/servers/{id}", s.updateRemoteServer)
+	mux.HandleFunc("DELETE /api/remote/servers/{id}", s.deleteRemoteServer)
+	mux.HandleFunc("POST /api/remote/servers/{id}/connect", s.connectRemoteServer)
+	mux.HandleFunc("POST /api/remote/servers/{id}/disconnect", s.disconnectRemoteServer)
+	mux.HandleFunc("POST /api/remote/servers/{id}/deploy", s.deployRemoteServer)
+	mux.HandleFunc("GET /api/remote/servers/{id}/health", s.healthRemoteServer)
+
+	// Image upload
+	mux.HandleFunc("POST /api/upload", s.uploadImage)
+
+	// Connectivity check
+	mux.HandleFunc("GET /api/check", s.checkConnectivity)
 
 	// WebSocket
 	mux.HandleFunc("/ws", s.handleWS)
@@ -394,6 +417,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 	// Build message history
 	msgs, _ := s.Messages.List(convID)
+	isFirstExchange := len(msgs) <= 1
 	var chatMsgs []llm.ChatMessage
 
 	// System prompt from settings
@@ -402,8 +426,36 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	if sysPrompt == "" {
 		sysPrompt = "You are AIOPE, a helpful AI assistant."
 	}
+	// Apply per-model system prompt override
+	if p := s.Providers.GetActive(); p != nil {
+		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok && mc.SystemPromptOverride != "" {
+			sysPrompt = mc.SystemPromptOverride + "\n\n" + sysPrompt
+		}
+	}
+	if s.Remote != nil {
+		if rc := s.Remote.BuildSystemContext(); rc != "" {
+			sysPrompt += "\n" + rc
+		}
+	}
+
+	// If conversation was compacted, merge summary into system prompt
+	var summaryText string
+	for _, m := range msgs {
+		if m.Role == "system" && m.Content != "" && m.Content != "⟳ Context compacted — earlier messages summarized" {
+			summaryText = m.Content
+			break
+		}
+	}
+	if summaryText != "" {
+		sysPrompt = sysPrompt + "\n\n--- CONVERSATION CONTEXT ---\n" + summaryText
+		log.Printf("chat.send: injected summary (%d chars) into system prompt", len(summaryText))
+	}
+
 	chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: sysPrompt})
 	for _, m := range msgs {
+		if m.Role == "system" {
+			continue // summary already merged into system prompt
+		}
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
 	}
 
@@ -500,7 +552,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	s.Conversations.Touch(convID)
 
 	// Auto-title after first exchange
-	if len(msgs) <= 1 {
+	if isFirstExchange {
 		go s.autoTitle(convID, content)
 	}
 
@@ -535,9 +587,13 @@ func (s *Server) autoTitle(convID, userMsg string) {
 	s.mu.RLock()
 	prov := s.Provider
 	s.mu.RUnlock()
+	if prov == nil {
+		log.Println("autoTitle: no provider")
+		return
+	}
 
 	// Use title task model if available
-	toolCtx := &llm.ToolContext{DB: s.DB}
+	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
 		toolCtx.GatewayURL = active.APIBase
 		toolCtx.GatewayKey = active.APIKey
@@ -551,12 +607,18 @@ func (s *Server) autoTitle(convID, userMsg string) {
 	if model == "" {
 		model = "gpt-4o"
 	}
-	prov.Stream(prompt, model, nil, func(ev llm.StreamEvent) {
+	log.Printf("autoTitle: conv=%s model=%s", convID, model)
+	err := prov.Stream(prompt, model, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			title.WriteString(ev.Delta)
 		}
 	})
+	if err != nil {
+		log.Printf("autoTitle error: %v", err)
+		return
+	}
 	t := strings.TrimSpace(title.String())
+	log.Printf("autoTitle result: %q", t)
 	if t != "" && len(t) < 100 {
 		s.Conversations.UpdateTitle(convID, t)
 		s.Hub.BroadcastJSON(map[string]any{"type": "conversation.updated", "id": convID, "title": t, "updatedAt": time.Now().UnixMilli()})
@@ -583,10 +645,31 @@ func (s *Server) createProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateProvider(w http.ResponseWriter, r *http.Request) {
-	var p provider.Profile
-	json.NewDecoder(r.Body).Decode(&p)
-	p.ID = r.PathValue("id")
-	if err := s.Providers.Update(&p); err != nil {
+	id := r.PathValue("id")
+	existing, _ := s.Providers.Get(id)
+	if existing == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	var patch provider.Profile
+	json.NewDecoder(r.Body).Decode(&patch)
+	// Merge: only overwrite non-zero fields
+	if patch.Label != "" {
+		existing.Label = patch.Label
+	}
+	if patch.APIKey != "" {
+		existing.APIKey = patch.APIKey
+	}
+	if patch.APIBase != "" {
+		existing.APIBase = patch.APIBase
+	}
+	if patch.SelectedModelID != "" {
+		existing.SelectedModelID = patch.SelectedModelID
+	}
+	if patch.ModelConfigs != nil {
+		existing.ModelConfigs = patch.ModelConfigs
+	}
+	if err := s.Providers.Update(existing); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -789,34 +872,320 @@ func (s *Server) connectMcpServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"tools": tools, "count": len(tools)})
 }
 
+// Remote servers
+
+func (s *Server) listRemoteServers(w http.ResponseWriter, r *http.Request) {
+	servers, _ := s.Remote.List()
+	if servers == nil {
+		servers = []remote.Server{}
+	}
+	// Annotate connected status
+	type resp struct {
+		remote.Server
+		Connected bool `json:"connected"`
+	}
+	out := make([]resp, len(servers))
+	for i, srv := range servers {
+		out[i] = resp{srv, s.Remote.IsConnected(srv.ID)}
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) createRemoteServer(w http.ResponseWriter, r *http.Request) {
+	var srv remote.Server
+	json.NewDecoder(r.Body).Decode(&srv)
+	if srv.ID == "" {
+		srv.ID = uuid.NewString()
+	}
+	if srv.Port == 0 {
+		srv.Port = 22
+	}
+	if srv.BootstrapPort == 0 {
+		srv.BootstrapPort = srv.Port
+	}
+	if err := s.Remote.Upsert(&srv); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, srv)
+}
+
+func (s *Server) updateRemoteServer(w http.ResponseWriter, r *http.Request) {
+	var srv remote.Server
+	json.NewDecoder(r.Body).Decode(&srv)
+	srv.ID = r.PathValue("id")
+	if err := s.Remote.Upsert(&srv); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (s *Server) deleteRemoteServer(w http.ResponseWriter, r *http.Request) {
+	s.Remote.Delete(r.PathValue("id"))
+	w.WriteHeader(204)
+}
+
+func (s *Server) connectRemoteServer(w http.ResponseWriter, r *http.Request) {
+	srv := s.Remote.Get(r.PathValue("id"))
+	if srv == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if err := s.Remote.Connect(srv); err != nil {
+		s.Remote.UpdateStatus(srv.ID, "error")
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "connected"})
+}
+
+func (s *Server) disconnectRemoteServer(w http.ResponseWriter, r *http.Request) {
+	s.Remote.Disconnect(r.PathValue("id"))
+	w.WriteHeader(204)
+}
+
+func (s *Server) healthRemoteServer(w http.ResponseWriter, r *http.Request) {
+	srv := s.Remote.Get(r.PathValue("id"))
+	if srv == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	if !s.Remote.IsConnected(srv.ID) {
+		if err := s.Remote.Connect(srv); err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+	}
+	result, err := s.Remote.Exec(srv.ID, "__aiope_health__", 10)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	// Parse and store health info
+	var health map[string]any
+	if json.Unmarshal([]byte(result), &health) == nil {
+		osInfo := fmt.Sprintf("%v %v - %v", health["os"], health["arch"], health["hostname"])
+		ver, _ := health["version"].(string)
+		s.Remote.UpdateHealth(srv.ID, osInfo, ver)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(result))
+}
+
+func (s *Server) deployRemoteServer(w http.ResponseWriter, r *http.Request) {
+	srv := s.Remote.Get(r.PathValue("id"))
+	if srv == nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	// Deploy runs the installer via bootstrap SSH on the standard port
+	s.Remote.UpdateStatus(srv.ID, "deploying")
+
+	// Connect to bootstrap port
+	bootstrap := *srv
+	bootstrap.Port = srv.BootstrapPort
+	if err := s.Remote.Connect(&bootstrap); err != nil {
+		s.Remote.UpdateStatus(srv.ID, "error")
+		http.Error(w, "bootstrap connect: "+err.Error(), 502)
+		return
+	}
+
+	// Check if installer exists locally
+	installerPath := os.ExpandEnv("$HOME/.aiope/aiope-remote-installer.sh")
+	if _, err := os.Stat(installerPath); err != nil {
+		s.Remote.UpdateStatus(srv.ID, "error")
+		http.Error(w, "installer not found at "+installerPath+". Build it first with the daemon build script.", 400)
+		return
+	}
+
+	// SCP installer and run it
+	data, _ := os.ReadFile(installerPath)
+	scpCmd := fmt.Sprintf("cat > /tmp/aiope-remote-installer.sh << 'INSTALLER_EOF'\n%s\nINSTALLER_EOF\nchmod +x /tmp/aiope-remote-installer.sh && /tmp/aiope-remote-installer.sh", string(data))
+	result, err := s.Remote.Exec(srv.ID, scpCmd, 120)
+	s.Remote.Disconnect(srv.ID)
+
+	if err != nil {
+		s.Remote.UpdateStatus(srv.ID, "error")
+		http.Error(w, "deploy failed: "+err.Error(), 502)
+		return
+	}
+
+	// Update to daemon port and try connecting
+	srv.Port = 2222
+	s.Remote.Upsert(srv)
+	s.Remote.UpdateStatus(srv.ID, "online")
+
+	writeJSON(w, map[string]string{"status": "deployed", "output": result})
+}
+
+func (s *Server) newToolContext() *llm.ToolContext {
+	tc := &llm.ToolContext{DB: s.DB}
+	tc.OnProgress = func(toolName, status string) {
+		s.Hub.BroadcastJSON(map[string]any{"type": "tool.progress", "tool": toolName, "status": status})
+	}
+	if s.Remote != nil {
+		tc.SSHStart = func(server string) (string, error) {
+			srv := s.Remote.GetByName(server)
+			if srv == nil {
+				srv = s.Remote.Get(server)
+			}
+			if srv == nil {
+				return "", fmt.Errorf("unknown server: %s", server)
+			}
+			if err := s.Remote.Connect(srv); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(`{"status":"connected","server":"%s","host":"%s:%d"}`, srv.Name, srv.Host, srv.Port), nil
+		}
+		tc.SSHExec = func(server, command string, timeout int) (string, error) {
+			srv := s.Remote.GetByName(server)
+			if srv == nil {
+				srv = s.Remote.Get(server)
+			}
+			if srv == nil {
+				return "", fmt.Errorf("unknown server: %s", server)
+			}
+			return s.Remote.Exec(srv.ID, command, timeout)
+		}
+		tc.SSHExit = func(server string) error {
+			srv := s.Remote.GetByName(server)
+			if srv == nil {
+				srv = s.Remote.Get(server)
+			}
+			if srv == nil {
+				return nil
+			}
+			s.Remote.Disconnect(srv.ID)
+			return nil
+		}
+	}
+	return tc
+}
+
+func (s *Server) checkConnectivity(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	p := s.Providers.GetActive()
+	s.mu.RUnlock()
+	if p == nil {
+		writeJSON(w, map[string]any{"ok": false, "error": "no active provider"})
+		return
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := strings.TrimRight(p.APIBase, "/") + "/models"
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+p.APIKey)
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	resp.Body.Close()
+	writeJSON(w, map[string]any{"ok": resp.StatusCode < 400, "status": resp.StatusCode, "provider": p.Label})
+}
+
+func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
+	r.ParseMultipartForm(10 << 20) // 10MB
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	defer file.Close()
+	dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "uploads")
+	os.MkdirAll(dir, 0755)
+	name := fmt.Sprintf("%d_%s", time.Now().UnixMilli(), header.Filename)
+	dst := filepath.Join(dir, name)
+	out, err := os.Create(dst)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	io.Copy(out, file)
+	out.Close()
+	writeJSON(w, map[string]string{"path": dst})
+}
+
 func (s *Server) refreshProvider() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.Providers.GetActive()
 	if p != nil {
-		s.Provider = &llm.OpenAI{APIKey: p.APIKey, APIBase: p.APIBase}
+		oai := &llm.OpenAI{APIKey: p.APIKey, APIBase: p.APIBase}
+		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok {
+			oai.Temperature = mc.Temperature
+			oai.TopP = mc.TopP
+			oai.MaxTokens = mc.MaxTokens
+			oai.ReasoningEffort = mc.ReasoningEffort
+			oai.EndpointOverride = mc.EndpointOverride
+		}
+		s.Provider = oai
 		s.Model = p.SelectedModelID
 	}
 }
 
 func encodeImageBase64(path string) (string, error) {
+	var data []byte
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		resp, err := http.Get(path)
 		if err != nil {
 			return "", err
 		}
 		defer resp.Body.Close()
-		data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+		data, _ = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	} else {
+		var err error
+		data, err = os.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
+	}
+	// Preprocess: decode, scale to max 1024px, square-pad, re-encode as JPEG
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		// Not a decodable image (SVG, etc.) — send raw
 		return base64.StdEncoding.EncodeToString(data), nil
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	maxDim := 1024
+	if w > maxDim || h > maxDim {
+		scale := float64(maxDim) / float64(w)
+		if float64(maxDim)/float64(h) < scale {
+			scale = float64(maxDim) / float64(h)
+		}
+		nw, nh := int(float64(w)*scale), int(float64(h)*scale)
+		scaled := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		for y := 0; y < nh; y++ {
+			for x := 0; x < nw; x++ {
+				sx := int(float64(x) / scale)
+				sy := int(float64(y) / scale)
+				scaled.Set(x, y, img.At(b.Min.X+sx, b.Min.Y+sy))
+			}
+		}
+		img = scaled
+		w, h = nw, nh
 	}
-	return base64.StdEncoding.EncodeToString(data), nil
+	// Square pad
+	side := w
+	if h > side {
+		side = h
+	}
+	if w != h {
+		padded := image.NewRGBA(image.Rect(0, 0, side, side))
+		// Fill with black
+		ox, oy := (side-w)/2, (side-h)/2
+		ib := img.Bounds()
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				padded.Set(ox+x, oy+y, img.At(ib.Min.X+x, ib.Min.Y+y))
+			}
+		}
+		img = padded
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85})
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -881,7 +1250,7 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 }
 
 func (s *Server) buildToolContext() *llm.ToolContext {
-	tc := &llm.ToolContext{DB: s.DB}
+	tc := s.newToolContext()
 	if p := s.Providers.GetActive(); p != nil {
 		tc.GatewayURL = p.APIBase
 		tc.GatewayKey = p.APIKey
@@ -1048,7 +1417,7 @@ func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
 	}
 
 	// Use summary task model
-	toolCtx := &llm.ToolContext{DB: s.DB}
+	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
 		toolCtx.GatewayURL = active.APIBase
 		toolCtx.GatewayKey = active.APIKey
@@ -1151,7 +1520,7 @@ func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language 
 		return
 	}
 
-	toolCtx := &llm.ToolContext{DB: s.DB}
+	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
 		toolCtx.GatewayURL = active.APIBase
 		toolCtx.GatewayKey = active.APIKey

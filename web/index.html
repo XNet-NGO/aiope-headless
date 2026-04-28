@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>AIOPE</title>
 <meta name="theme-color" content="#000000">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+<link id="hljs-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
 <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -23,10 +23,23 @@
   --user-bubble:#003D42;--assistant-bubble:#0A0A0A;
   --stop-button:#FF1744;
 }
+[data-theme="light"]{
+  --primary:#0097A7;--primary-container:#B2EBF2;
+  --secondary:#F57F17;--secondary-container:#FFF8E1;
+  --bg:#FAFAFA;--surface:#FFF;--surface-variant:#F5F5F5;
+  --card-bg:#FFF;--card-elevated:#F5F5F5;
+  --text-primary:#212121;--text-secondary:#757575;
+  --outline:#E0E0E0;--divider:#EEE;
+  --error:#D32F2F;--success:#388E3C;
+  --code-bg:#F5F5F5;--code-text:#333;
+  --inline-code-text:#D84315;--inline-code-bg:#FFF3E0;
+  --user-bubble:#E0F7FA;--assistant-bubble:#FAFAFA;
+  --stop-button:#D32F2F;
+}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text-primary);height:100vh;display:flex;overflow:hidden}
 
 .sidebar{width:260px;background:var(--surface-variant);border-right:1px solid var(--outline);display:flex;flex-direction:column;flex-shrink:0}
-.sidebar-hdr{padding:12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--outline)}
+.sidebar-hdr{padding:7px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--outline);height:40px}
 .sidebar-hdr h2{font-size:14px;color:var(--primary);font-weight:600}
 .new-btn{background:var(--primary);color:#000;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
 .conv-list{flex:1;overflow-y:auto;padding:8px}
@@ -36,14 +49,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .conv-item .title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .conv-item .del{display:none;background:none;border:none;color:var(--error);cursor:pointer;font-size:14px;padding:2px 6px}
 .conv-item:hover .del{display:block}
-.sidebar-footer{padding:12px;border-top:1px solid var(--outline)}
+.sidebar-footer{padding:12px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--outline)}
 .sidebar-footer button{width:100%;background:var(--card-bg);border:1px solid var(--outline);color:var(--text-secondary);border-radius:6px;padding:8px;font-size:12px;cursor:pointer}
 .sidebar-footer button:hover{color:var(--text-primary);border-color:var(--text-secondary)}
 
+.slider-row{display:flex;align-items:center;gap:8px;margin:6px 0}
+.slider-row label{font-size:12px;color:var(--text-secondary);min-width:100px}
+.slider-row input[type=range]{flex:1;accent-color:var(--primary);height:4px}
+.slider-row .slider-val{font-size:12px;color:var(--primary);min-width:50px;text-align:right}
+.toggle-row{display:flex;align-items:center;gap:12px;margin:4px 0;flex-wrap:wrap}
+.toggle-row label{font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer}
+.section-label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 4px;font-weight:600}
+
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
-.main-hdr{padding:12px 16px;border-bottom:1px solid var(--outline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.main-hdr .chat-title{font-size:15px;font-weight:600}
+.main-hdr{padding:12px 16px;border-bottom:1px solid var(--outline);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;height:40px}
+.main-hdr .chat-title{font-size:15px;font-weight:600;color:var(--primary)}
 .main-hdr .menu-btn{display:none;background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;margin-right:12px}
+.model-sel{background:var(--card-bg);border:1px solid var(--outline);color:var(--text-primary);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-sel:hover{border-color:var(--primary)}
+.model-dropdown{position:absolute;top:100%;right:0;margin-top:4px;background:var(--card-bg);border:1px solid var(--outline);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.3);max-height:300px;overflow-y:auto;min-width:220px;z-index:100}
+.model-dropdown .model-opt{padding:8px 12px;font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-dropdown .model-opt:hover{background:var(--surface-variant)}
+.model-dropdown .model-opt.active{color:var(--primary);font-weight:600}
 
 .messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:80%;padding:10px 14px;font-size:14px;line-height:1.6;word-wrap:break-word}
@@ -66,7 +93,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 
 .empty-state{flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:15px}
 
-.input-area{background:var(--surface-variant);border-top:1px solid var(--outline);padding:12px 16px;flex-shrink:0}
+.input-area{background:var(--surface-variant);border-top:1px solid var(--outline);padding:12px 16px;padding-bottom:calc(48px + env(safe-area-inset-bottom,0px));flex-shrink:0}
 .mode-pills{display:flex;gap:4px;margin-bottom:8px}
 .mode-pill{padding:4px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;background:var(--card-bg);color:var(--text-secondary);border:1px solid var(--outline);user-select:none}
 .mode-pill.active{background:var(--primary-container);color:var(--primary);border-color:var(--primary)}
@@ -83,7 +110,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 /* Reasoning/thinking block */
 .reasoning{margin-bottom:8px;border:1px solid var(--outline);border-radius:8px;overflow:hidden}
 .reasoning summary{padding:8px 12px;font-size:12px;color:var(--text-secondary);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
-.reasoning summary::before{content:'💭'}
+.reasoning summary::before{content:'';display:inline-block;width:14px;height:14px;margin-right:4px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'%3E%3Cpath d='M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z'/%3E%3C/svg%3E") center/contain no-repeat}
 .reasoning.active summary{color:var(--primary)}
 .reasoning .reasoning-text{padding:4px 12px 10px;font-size:13px;color:var(--text-secondary);line-height:1.5;max-height:200px;overflow-y:auto;white-space:pre-wrap}
 @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
@@ -122,10 +149,10 @@ select.msg-act option{background:var(--card-bg);color:var(--text-primary)}
 .modal-hdr{padding:12px 16px;border-bottom:1px solid var(--outline);display:flex;justify-content:space-between;align-items:center}
 .modal-hdr h3{font-size:15px;color:var(--primary)}
 .modal-close{background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer}
-.modal-tabs{display:flex;border-bottom:1px solid var(--outline)}
-.modal-tab{padding:10px 16px;font-size:13px;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent}
+.modal-tabs{display:flex;border-bottom:1px solid var(--outline);overflow-x:auto;-webkit-overflow-scrolling:touch}
+.modal-tab{padding:10px 16px;font-size:13px;cursor:pointer;color:var(--text-secondary);border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0}
 .modal-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
-.modal-body{flex:1;overflow-y:auto;padding:16px}
+.modal-body{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
 .field{margin-bottom:12px}
 .field label{display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px}
 .field input,.field textarea,.field select{width:100%;background:var(--card-bg);color:var(--text-primary);border:1px solid var(--outline);border-radius:8px;padding:8px 12px;font-size:14px;font-family:inherit}
@@ -142,6 +169,7 @@ select.msg-act option{background:var(--card-bg);color:var(--text-primary)}
 .btn-primary{background:var(--primary);color:#000;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}
 .btn-primary:hover{opacity:.9}
 
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 @media(max-width:768px){
   .sidebar{position:fixed;left:-260px;top:0;bottom:0;z-index:100;transition:left .2s}
   .sidebar.open{left:0}
@@ -155,15 +183,19 @@ select.msg-act option{background:var(--card-bg);color:var(--text-primary)}
 <body>
 <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 <div class="sidebar" id="sidebar">
-  <div class="sidebar-hdr"><h2>AIOPE</h2><button class="new-btn" onclick="newChat()">+ New</button></div>
+  <div class="sidebar-hdr"><button class="new-btn" onclick="newChat()">+ New</button></div>
   <div class="conv-list" id="convList"></div>
-  <div class="sidebar-footer"><button onclick="openSettings()">⚙ Settings</button></div>
+  <div class="sidebar-footer"><button onclick="openSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Settings</button></div>
 </div>
 <div class="main">
   <div class="main-hdr">
     <div style="display:flex;align-items:center">
-      <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+      <button class="menu-btn" onclick="toggleSidebar()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <span class="chat-title" id="chatTitle">AIOPE</span>
+    </div>
+    <div style="position:relative">
+      <button id="modelBtn" class="model-sel" onclick="toggleModelDropdown()"><span id="modelLabel">...</span><svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor"><path d="M0 0l5 6 5-6z"/></svg></button>
+      <div id="modelDropdown" class="model-dropdown" style="display:none"></div>
     </div>
   </div>
   <div class="messages" id="messages"><div class="empty-state">Start a conversation</div></div>
@@ -173,9 +205,11 @@ select.msg-act option{background:var(--card-bg);color:var(--text-primary)}
       <div class="mode-pill" onclick="setMode('plan')">PLAN</div>
       <div class="mode-pill" onclick="setMode('build')">BUILD</div>
     </div>
+    <div id="imagePreview" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div class="input-row">
-      <textarea id="input" rows="1" placeholder="Message AIOPE..." onkeydown="handleKey(event)" oninput="autoGrow(this)"></textarea>
-      <button class="send-btn" id="sendBtn" onclick="send()">▶</button>
+      <label style="cursor:pointer;padding:6px;color:var(--text-secondary)" title="Attach image"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg><input type="file" accept="image/*" multiple style="display:none" onchange="attachFiles(this.files)"></label>
+      <textarea id="input" rows="1" placeholder="Message AIOPE..." onkeydown="handleKey(event)" oninput="autoGrow(this)" ondrop="dropFiles(event)" ondragover="event.preventDefault()"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="send()"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
     </div>
   </div>
 </div>
@@ -183,10 +217,16 @@ select.msg-act option{background:var(--card-bg);color:var(--text-primary)}
 <!-- Settings Modal -->
 <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
   <div class="modal">
-    <div class="modal-hdr"><h3>Settings</h3><button class="modal-close" onclick="closeSettings()">✕</button></div>
+    <div class="modal-hdr"><h3>Settings</h3><button class="modal-close" onclick="closeSettings()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-tabs">
       <div class="modal-tab active" onclick="settingsTab('providers')">Providers</div>
+      <div class="modal-tab" onclick="settingsTab('tasks')">Task Models</div>
+      <div class="modal-tab" onclick="settingsTab('servers')">Servers</div>
+      <div class="modal-tab" onclick="settingsTab('mcp')">MCP</div>
+      <div class="modal-tab" onclick="settingsTab('tools')">Tools</div>
       <div class="modal-tab" onclick="settingsTab('agent')">Agent</div>
+      <div class="modal-tab" onclick="settingsTab('theme')">Theme</div>
+      <div class="modal-tab" onclick="settingsTab('export')">Export/Import</div>
     </div>
     <div class="modal-body" id="settingsBody"></div>
   </div>
@@ -265,6 +305,10 @@ function connectWS(){
       case 'translation.delta':
         if(m.conversationId===S.active){S.translations[m.messageId]=(S.translations[m.messageId]||'')+m.delta;renderMessages()}
         break;
+      case 'tool.progress':{
+        const t=S.streamTools.find(x=>x.name==='task'&&x.status==='running');
+        if(t){t.subStatus=m.status;renderStreamDelta()}
+        break;}
       case 'translation.done':
         break;
         break;
@@ -277,7 +321,7 @@ function renderSidebar(){
   document.getElementById('convList').innerHTML=S.convs.map(c=>
     `<div class="conv-item${c.id===S.active?' active':''}" onclick="selectConv('${c.id}')">
       <span class="title">${esc(c.title)}</span>
-      <button class="del" onclick="event.stopPropagation();delConv('${c.id}')">✕</button>
+      <button class="del" onclick="event.stopPropagation();delConv('${c.id}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>`).join('');
 }
 
@@ -321,8 +365,9 @@ function renderReasoning(text,active){
 
 function renderToolStrip(tools){
   return '<div class="tool-strip">'+tools.map(t=>{
-    const icon=t.status==='running'?'⟳':t.status==='done'?'✓':'⚠';
-    return `<div class="tool-chip ${t.status}" onclick="this.nextElementSibling.classList.toggle('open')"><span class="icon">${icon}</span>${t.name}</div><div class="tool-detail">${t.args}${t.result?'\n───\n'+t.result:''}</div>`;
+    const icon=t.status==='running'?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>':t.status==='done'?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>':'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    const sub=t.subStatus?` <span style="opacity:.7;font-size:11px">${esc(t.subStatus)}</span>`:'';
+    return `<div class="tool-chip ${t.status}" onclick="this.nextElementSibling.classList.toggle('open')"><span class="icon">${icon}</span>${t.name}${sub}</div><div class="tool-detail">${t.args}${t.result?'\n───\n'+t.result:''}</div>`;
   }).join('')+'</div>';
 }
 
@@ -358,7 +403,7 @@ function renderStreamDelta(){
 function updateSendBtn(){
   const btn=document.getElementById('sendBtn');
   btn.className=S.streaming?'send-btn streaming':'send-btn';
-  btn.textContent=S.streaming?'■':'▶';
+  btn.innerHTML=S.streaming?'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>':'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
 }
 
 function appendError(err){
@@ -368,10 +413,23 @@ function appendError(err){
 }
 
 async function newChat(){
+  // Reuse top conv if it's empty
+  if(S.convs.length>0){
+    const top=S.convs[0];
+    const data=await api.get('/api/conversations/'+top.id);
+    if(!data.messages||data.messages.length===0){
+      S.active=top.id;S.msgs=[];
+      document.getElementById('chatTitle').textContent='AIOPE';
+      renderMessages();renderSidebar();
+      document.getElementById('input').focus();
+      if(window.innerWidth<768)toggleSidebar();
+      return;
+    }
+  }
   const r=await api.post('/api/conversations',{title:'New Chat'});
   const c=await r.json();
   S.active=c.id;S.msgs=[];
-  document.getElementById('chatTitle').textContent=c.title;
+  document.getElementById('chatTitle').textContent='AIOPE';
   renderMessages();renderSidebar();
   document.getElementById('input').focus();
   if(window.innerWidth<768)toggleSidebar();
@@ -389,12 +447,65 @@ async function selectConv(id){
 
 async function delConv(id){await api.del('/api/conversations/'+id)}
 
+let pendingImages=[];
+let lastSendTime=0;
+async function attachFiles(files){
+  for(const f of files){
+    if(!f.type.startsWith('image/'))continue;
+    const fd=new FormData();fd.append('file',f);
+    const r=await fetch('/api/upload',{method:'POST',body:fd});
+    const j=await r.json();
+    pendingImages.push(j.path);
+  }
+  renderImagePreview();
+}
+function dropFiles(e){e.preventDefault();if(e.dataTransfer.files.length)attachFiles(e.dataTransfer.files)}
+function renderImagePreview(){
+  const el=document.getElementById('imagePreview');
+  if(!pendingImages.length){el.style.display='none';return}
+  el.style.display='flex';
+  el.innerHTML=pendingImages.map((p,i)=>`<div style="position:relative;width:48px;height:48px;border-radius:6px;overflow:hidden;border:1px solid var(--outline);background:var(--surface-variant)"><img src="/api/upload?path=${encodeURIComponent(p)}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'"><button onclick="pendingImages.splice(${i},1);renderImagePreview()" style="position:absolute;top:-2px;right:-2px;background:var(--error);color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;line-height:16px;text-align:center">x</button></div>`).join('');
+}
 function send(){
   if(S.streaming){ws.send(JSON.stringify({type:'chat.cancel',conversationId:S.active}));return}
+  const now=Date.now();if(now-lastSendTime<500)return;lastSendTime=now;
   const input=document.getElementById('input');
-  const text=input.value.trim();if(!text)return;
+  const text=input.value.trim();if(!text&&!pendingImages.length)return;
   input.value='';input.style.height='auto';
-  ws.send(JSON.stringify({type:'chat.send',conversationId:S.active||'',content:text,mode:S.mode}));
+  const msg={type:'chat.send',conversationId:S.active||'',content:text,mode:S.mode};
+  if(pendingImages.length){msg.imagePaths=pendingImages.slice();pendingImages=[];renderImagePreview()}
+  ws.send(JSON.stringify(msg));
+}
+
+let modelCache=[];
+async function loadModelLabel(){
+  const provs=await api.get('/api/providers');
+  const active=provs.find(p=>p.isActive);
+  if(active){
+    document.getElementById('modelLabel').textContent=active.selectedModelId||'select model';
+    S.activeProviderId=active.id;
+  }
+}
+async function toggleModelDropdown(){
+  const dd=document.getElementById('modelDropdown');
+  if(dd.style.display!=='none'){dd.style.display='none';return}
+  if(!S.activeProviderId){await loadModelLabel()}
+  if(!S.activeProviderId)return;
+  if(!modelCache.length){
+    try{modelCache=await api.get('/api/providers/'+S.activeProviderId+'/models')||[]}catch(e){modelCache=[]}
+  }
+  const current=document.getElementById('modelLabel').textContent;
+  dd.innerHTML=modelCache.map(m=>`<div class="model-opt${m.id===current?' active':''}" onclick="selectModel('${m.id}')">${m.id}</div>`).join('')||'<div class="model-opt" style="color:var(--text-secondary)">No models</div>';
+  dd.style.display='block';
+  const close=e=>{if(!dd.contains(e.target)&&e.target.id!=='modelBtn'){dd.style.display='none';document.removeEventListener('click',close)}};
+  setTimeout(()=>document.addEventListener('click',close),0);
+}
+async function selectModel(id){
+  document.getElementById('modelDropdown').style.display='none';
+  document.getElementById('modelLabel').textContent=id;
+  if(S.activeProviderId){
+    await api.put('/api/providers/'+S.activeProviderId,{selectedModelId:id});
+  }
 }
 
 function setMode(m){
@@ -455,9 +566,16 @@ function closeSettings(){document.getElementById('settingsModal').classList.remo
 
 function settingsTab(name){
   settingsTabName=name;
-  document.querySelectorAll('.modal-tab').forEach(t=>t.classList.toggle('active',t.textContent.toLowerCase()===name));
+  const tabMap={providers:'Providers',tasks:'Task Models',servers:'Servers',mcp:'MCP',tools:'Tools',agent:'Agent',theme:'Theme',export:'Export/Import'};
+  document.querySelectorAll('.modal-tab').forEach(t=>t.classList.toggle('active',t.textContent===tabMap[name]));
   if(name==='providers')renderProviderSettings();
+  else if(name==='tasks')renderTaskSettings();
+  else if(name==='servers')renderServerSettings();
+  else if(name==='mcp')renderMcpSettings();
+  else if(name==='tools')renderToolSettings();
   else if(name==='agent')renderAgentSettings();
+  else if(name==='theme')renderThemeSettings();
+  else if(name==='export')renderExportSettings();
 }
 
 async function renderProviderSettings(){
@@ -467,7 +585,7 @@ async function renderProviderSettings(){
     <div id="provList">${providers.map(p=>`
       <div class="prov-item${p.isActive?' active':''}" onclick="activateProvider('${p.id}')">
         <div><div class="prov-label">${esc(p.label||p.builtinId||'Provider')}</div>
-        <div class="prov-model">${esc(p.selectedModelId||'no model')}${p.isActive?' ✓':''}</div></div>
+        <div class="prov-model">${esc(p.selectedModelId||'no model')}${p.isActive?' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>':''}</div></div>
         <div class="prov-actions">
           <button onclick="event.stopPropagation();editProvider('${p.id}')">Edit</button>
           <button onclick="event.stopPropagation();deleteProvider('${p.id}')">Del</button>
@@ -489,6 +607,10 @@ async function renderProviderSettings(){
         <button class="btn-primary" onclick="saveProvider()">Save</button>
         <button class="btn-primary" onclick="saveAndActivate()" style="background:var(--success)">Save & Activate</button>
       </div>
+    </div>
+    <div id="modelConfigPanel" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--outline)">
+      <h4 style="margin:0 0 12px">Model Config</h4>
+      <div id="mcFields"></div>
     </div>`;
 }
 
@@ -496,6 +618,7 @@ let editingProvider=null;
 async function editProvider(id){
   const editor=document.getElementById('provEditor');
   editor.style.display='block';
+  const mcp=document.getElementById('modelConfigPanel');
   if(id){
     const providers=await api.get('/api/providers');
     editingProvider=providers.find(p=>p.id===id);
@@ -505,6 +628,8 @@ async function editProvider(id){
       document.getElementById('pe_base').value=editingProvider.apiBase||'';
       document.getElementById('pe_key').value=editingProvider.apiKey||'';
       document.getElementById('pe_model').value=editingProvider.selectedModelId||'';
+      renderModelConfig();
+      mcp.style.display='block';
     }
   }else{
     editingProvider=null;
@@ -513,7 +638,91 @@ async function editProvider(id){
     document.getElementById('pe_base').value='';
     document.getElementById('pe_key').value='';
     document.getElementById('pe_model').value='';
+    mcp.style.display='none';
   }
+}
+
+function renderModelConfig(){
+  if(!editingProvider)return;
+  const mid=document.getElementById('pe_model').value;
+  if(!mid){document.getElementById('mcFields').innerHTML='<em>Select a model first</em>';return}
+  const configs=editingProvider.modelConfigs||{};
+  const mc=configs[mid]||{modelId:mid,contextTokens:128000,temperature:0.6,autoCompact:true};
+
+  const TOKEN_STEPS=[0,256,512,1024,2048,4096,8192,16000,32000,64000,128000,200000,500000,1000000];
+  const CTX_STEPS=[1000,2000,4000,8000,16000,32000,64000,128000,200000,256000,384000,500000,750000,1000000,2000000];
+  const reasoningOpts=['off','low','medium','high','auto'];
+
+  function stepIdx(steps,val){if(!val)return 0;let i=steps.findIndex(s=>s>=val);return i<0?steps.length-1:i}
+  function fmtK(v){return v>=1000000?(v/1000000)+'M':v>=1000?(v/1000)+'K':v.toString()}
+
+  const tempVal=mc.temperature!=null?mc.temperature:0;
+  const toppVal=mc.topP!=null?mc.topP:0;
+  const topkVal=mc.topK!=null?mc.topK:0;
+  const maxTokIdx=stepIdx(TOKEN_STEPS,mc.maxTokens||0);
+  const ctxIdx=stepIdx(CTX_STEPS,mc.contextTokens||128000);
+  const reasonIdx=Math.max(0,reasoningOpts.indexOf(mc.reasoningEffort||'off'));
+
+  document.getElementById('mcFields').innerHTML=`
+    <div class="section-label">Abilities</div>
+    <div class="toggle-row">
+      <label><input type="checkbox" id="mc_tools" ${mc.toolsOverride!==false?'checked':''} onchange="updateMC()"> Tool Calling</label>
+      <label><input type="checkbox" id="mc_vision" ${mc.visionOverride?'checked':''} onchange="updateMC()"> Vision</label>
+      <label><input type="checkbox" id="mc_compact" ${mc.autoCompact!==false?'checked':''} onchange="updateMC()"> Auto-Compact</label>
+    </div>
+
+    <div class="section-label">Reasoning</div>
+    <div class="slider-row"><label>Effort</label>
+      <input type="range" id="mc_reasoning" min="0" max="4" step="1" value="${reasonIdx}" oninput="document.getElementById('mc_reason_val').textContent=['off','low','medium','high','auto'][this.value];updateMC()">
+      <span class="slider-val" id="mc_reason_val">${reasoningOpts[reasonIdx]}</span></div>
+
+    <div class="section-label">Parameters</div>
+    <div class="slider-row"><label>Temperature</label>
+      <input type="range" id="mc_temp" min="0" max="2" step="0.05" value="${tempVal}" oninput="document.getElementById('mc_temp_val').textContent=this.value<=0?'off':parseFloat(this.value).toFixed(2);updateMC()">
+      <span class="slider-val" id="mc_temp_val">${tempVal<=0?'off':tempVal.toFixed(2)}</span></div>
+    <div class="slider-row"><label>Top-P</label>
+      <input type="range" id="mc_topp" min="0" max="1" step="0.05" value="${toppVal}" oninput="document.getElementById('mc_topp_val').textContent=this.value<=0?'off':parseFloat(this.value).toFixed(2);updateMC()">
+      <span class="slider-val" id="mc_topp_val">${toppVal<=0?'off':toppVal.toFixed(2)}</span></div>
+    <div class="slider-row"><label>Top-K</label>
+      <input type="range" id="mc_topk" min="0" max="200" step="1" value="${topkVal}" oninput="document.getElementById('mc_topk_val').textContent=this.value==0?'off':this.value;updateMC()">
+      <span class="slider-val" id="mc_topk_val">${topkVal==0?'off':topkVal}</span></div>
+    <div class="slider-row"><label>Max Tokens</label>
+      <input type="range" id="mc_maxtok" min="0" max="${TOKEN_STEPS.length-1}" step="1" value="${maxTokIdx}" oninput="let s=[${TOKEN_STEPS}];document.getElementById('mc_maxtok_val').textContent=s[this.value]==0?'off':s[this.value]>=1000?(s[this.value]/1000)+'K':s[this.value];updateMC()">
+      <span class="slider-val" id="mc_maxtok_val">${TOKEN_STEPS[maxTokIdx]==0?'off':fmtK(TOKEN_STEPS[maxTokIdx])}</span></div>
+
+    <div class="section-label">Context</div>
+    <div class="slider-row"><label>Context Tokens</label>
+      <input type="range" id="mc_ctx" min="0" max="${CTX_STEPS.length-1}" step="1" value="${ctxIdx}" oninput="let s=[${CTX_STEPS}];document.getElementById('mc_ctx_val').textContent=s[this.value]>=1000000?(s[this.value]/1000000)+'M':s[this.value]>=1000?(s[this.value]/1000)+'K':s[this.value];updateMC()">
+      <span class="slider-val" id="mc_ctx_val">${fmtK(CTX_STEPS[ctxIdx])}</span></div>`;
+}
+
+function updateMC(){
+  if(!editingProvider)return;
+  const mid=document.getElementById('pe_model').value;
+  if(!mid)return;
+  if(!editingProvider.modelConfigs)editingProvider.modelConfigs={};
+  const TOKEN_STEPS=[0,256,512,1024,2048,4096,8192,16000,32000,64000,128000,200000,500000,1000000];
+  const CTX_STEPS=[1000,2000,4000,8000,16000,32000,64000,128000,200000,256000,384000,500000,750000,1000000,2000000];
+  const reasoningOpts=['off','low','medium','high','auto'];
+  const temp=parseFloat(document.getElementById('mc_temp').value);
+  const topp=parseFloat(document.getElementById('mc_topp').value);
+  const topk=parseInt(document.getElementById('mc_topk').value);
+  const maxTokIdx=parseInt(document.getElementById('mc_maxtok').value);
+  const ctxIdx=parseInt(document.getElementById('mc_ctx').value);
+  const reasonIdx=parseInt(document.getElementById('mc_reasoning').value);
+  const reason=reasoningOpts[reasonIdx];
+  editingProvider.modelConfigs[mid]={
+    modelId:mid,
+    contextTokens:CTX_STEPS[ctxIdx]||128000,
+    temperature:temp>0?temp:null,
+    topP:topp>0?topp:null,
+    topK:topk>0?topk:null,
+    maxTokens:TOKEN_STEPS[maxTokIdx]||null,
+    reasoningEffort:reason==='off'?null:reason,
+    toolsOverride:document.getElementById('mc_tools').checked,
+    visionOverride:document.getElementById('mc_vision').checked,
+    autoCompact:document.getElementById('mc_compact').checked,
+  };
 }
 
 async function saveProvider(){
@@ -523,7 +732,8 @@ async function saveProvider(){
     apiBase:document.getElementById('pe_base').value,
     apiKey:document.getElementById('pe_key').value,
     selectedModelId:document.getElementById('pe_model').value,
-    builtinId:'openai'
+    builtinId:'openai',
+    modelConfigs:editingProvider?.modelConfigs||{}
   };
   if(p.id){await api.put('/api/providers/'+p.id,p)}
   else{await api.post('/api/providers',p)}
@@ -555,8 +765,44 @@ async function loadModels(){
   sel.style.display='block';sel.innerHTML='<option>Loading...</option>';
   try{
     const models=await api.get('/api/providers/'+id+'/models');
+    cachedModels=models;
     sel.innerHTML=models.sort((a,b)=>a.id.localeCompare(b.id)).map(m=>`<option value="${m.id}">${m.id}</option>`).join('');
   }catch(e){sel.innerHTML='<option>Error loading models</option>'}
+}
+
+// Refresh model config when model selector changes
+document.addEventListener('change',e=>{if(e.target.id==='pe_model'||e.target.id==='pe_models')renderModelConfig()});
+
+const taskDefs=[
+  {id:'title',label:'Title Generation',desc:'Auto-generate conversation titles'},
+  {id:'summary',label:'Summary / Compact',desc:'Conversation summarization'},
+  {id:'translation',label:'Translation',desc:'Text translation'},
+  {id:'image_recognition',label:'Image Recognition',desc:'Analyze images'},
+  {id:'subagent',label:'Subagent (Task Tool)',desc:'Background research agents'},
+  {id:'image_gen',label:'Image Generation',desc:'Generate images from text'},
+];
+
+let cachedModels=null;
+async function getActiveModels(){
+  if(cachedModels)return cachedModels;
+  const providers=await api.get('/api/providers');
+  const active=providers.find(p=>p.isActive);
+  if(!active)return[];
+  try{cachedModels=await api.get('/api/providers/'+active.id+'/models');return cachedModels}catch(e){return[]}
+}
+
+async function renderTaskSettings(){
+  const body=document.getElementById('settingsBody');
+  const settings=await api.get('/api/settings');
+  const models=await getActiveModels();
+  const opts=models.sort((a,b)=>a.id.localeCompare(b.id)).map(m=>`<option value="${m.id}">${m.id}</option>`).join('');
+  body.innerHTML=`<p style="color:var(--text-secondary);font-size:13px;margin:0 0 16px">Assign models per task. Uses defaults if not set.</p>`+
+    taskDefs.map(t=>{
+      const val=settings['task_model_'+t.id]||'';
+      const selOpts=`<option value="">— default —</option>`+models.sort((a,b)=>a.id.localeCompare(b.id)).map(m=>`<option value="${m.id}"${m.id===val?' selected':''}>${m.id}</option>`).join('');
+      return `<div class="field"><label>${t.label} <span style="color:var(--text-secondary);font-size:11px">${t.desc}</span></label>
+        <select onchange="saveSetting('task_model_${t.id}',this.value)" style="width:100%">${selOpts}</select></div>`;
+    }).join('');
 }
 
 const agentKeys=[
@@ -586,10 +832,287 @@ async function saveSetting(key,value){
   await api.put('/api/settings/'+key,{value});
 }
 
+// Remote Servers
+async function renderServerSettings(){
+  const body=document.getElementById('settingsBody');
+  const servers=await api.get('/api/remote/servers');
+  body.innerHTML=servers.map(s=>{
+    const color=s.connected?'var(--success)':s.status==='error'?'var(--error)':'var(--text-secondary)';
+    const statusText=s.connected?'CONNECTED':s.status;
+    return `<div class="prov-item" style="flex-direction:column;align-items:stretch;gap:4px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="prov-label"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:8px"></span>${esc(s.name)}</div>
+        <div class="prov-model">${esc(s.user)}@${esc(s.host)}:${s.port} · ${statusText}${s.osInfo?' · '+s.osInfo:''}</div></div>
+        <div class="prov-actions">
+          ${s.connected?`<button onclick="srvDisconnect('${s.id}')">Disconnect</button>`:`<button onclick="srvConnect('${s.id}')">Connect</button>`}
+          <button onclick="srvDeploy('${s.id}')">Deploy</button>
+          <button onclick="srvHealth('${s.id}')">Health</button>
+          <button onclick="editSrv('${s.id}')">Edit</button>
+          <button onclick="deleteSrv('${s.id}')">Del</button>
+        </div>
+      </div>
+    </div>`}).join('')+`
+    <button class="btn-primary" onclick="editSrv()" style="margin-top:12px">+ Add Server</button>
+    <div id="srvEditor" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--outline)">
+      <input type="hidden" id="srv_id">
+      <div class="field"><label>Name</label><input id="srv_name" placeholder="devbox"></div>
+      <div style="display:flex;gap:8px">
+        <div class="field" style="flex:2"><label>Host</label><input id="srv_host" placeholder="192.168.1.10"></div>
+        <div class="field" style="flex:1"><label>User</label><input id="srv_user" placeholder="root"></div>
+        <div class="field" style="width:80px"><label>Port</label><input id="srv_port" type="number" value="22"></div>
+      </div>
+      <div class="field"><label>Key File Path</label><input id="srv_keypath" placeholder="~/.ssh/id_ed25519"></div>
+      <div class="field"><label>Private Key (paste, optional)</label><textarea id="srv_privkey" rows="4" style="font-family:monospace;font-size:11px" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" onclick="saveSrv()">Save</button>
+      </div>
+    </div>
+    <div id="srvHealthOutput" style="display:none;margin-top:12px;padding:12px;background:var(--card-bg);border-radius:8px;font-family:monospace;font-size:12px;white-space:pre-wrap"></div>`;
+}
+
+let editingSrv=null;
+async function editSrv(id){
+  document.getElementById('srvEditor').style.display='block';
+  if(id){
+    const servers=await api.get('/api/remote/servers');
+    editingSrv=servers.find(s=>s.id===id);
+    if(editingSrv){
+      document.getElementById('srv_id').value=id;
+      document.getElementById('srv_name').value=editingSrv.name||'';
+      document.getElementById('srv_host').value=editingSrv.host||'';
+      document.getElementById('srv_user').value=editingSrv.user||'';
+      document.getElementById('srv_port').value=editingSrv.port||22;
+      document.getElementById('srv_keypath').value=editingSrv.keyPath||'';
+      document.getElementById('srv_privkey').value=editingSrv.privateKey||'';
+    }
+  }else{
+    editingSrv=null;
+    ['srv_id','srv_name','srv_host','srv_privkey','srv_keypath'].forEach(x=>document.getElementById(x).value='');
+    document.getElementById('srv_user').value='root';
+    document.getElementById('srv_port').value='22';
+  }
+}
+
+async function saveSrv(){
+  const s={
+    id:document.getElementById('srv_id').value,
+    name:document.getElementById('srv_name').value,
+    host:document.getElementById('srv_host').value,
+    user:document.getElementById('srv_user').value,
+    port:parseInt(document.getElementById('srv_port').value)||22,
+    bootstrapPort:parseInt(document.getElementById('srv_port').value)||22,
+    keyPath:document.getElementById('srv_keypath').value,
+    privateKey:document.getElementById('srv_privkey').value,
+  };
+  if(s.id)await api.put('/api/remote/servers/'+s.id,s);
+  else await api.post('/api/remote/servers',s);
+  renderServerSettings();
+}
+
+async function deleteSrv(id){await api.del('/api/remote/servers/'+id);renderServerSettings()}
+async function srvConnect(id){
+  try{await api.post('/api/remote/servers/'+id+'/connect');renderServerSettings()}
+  catch(e){alert('Connect failed: '+e.message)}
+}
+async function srvDisconnect(id){await api.post('/api/remote/servers/'+id+'/disconnect');renderServerSettings()}
+async function srvDeploy(id){
+  if(!confirm('Deploy aiope-remote daemon to this server?'))return;
+  try{
+    const r=await api.post('/api/remote/servers/'+id+'/deploy');
+    alert('Deployed! '+r.status);renderServerSettings();
+  }catch(e){alert('Deploy failed: '+e.message)}
+}
+async function srvHealth(id){
+  const out=document.getElementById('srvHealthOutput');
+  out.style.display='block';out.textContent='Loading...';
+  try{
+    const h=await api.get('/api/remote/servers/'+id+'/health');
+    out.textContent=JSON.stringify(h,null,2);
+    renderServerSettings();
+  }catch(e){out.textContent='Error: '+e.message}
+}
+
+// MCP Servers
+async function renderMcpSettings(){
+  const body=document.getElementById('settingsBody');
+  const servers=await api.get('/api/mcp/servers');
+  body.innerHTML=servers.map(s=>`
+    <div class="prov-item" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="prov-label">${esc(s.name||s.url)}</div>
+        <div class="prov-model">${esc(s.transport||'sse')} · ${s.status||'idle'}${s.toolCount?' · '+s.toolCount+' tools':''}${s.error?' · '+s.error:''}</div></div>
+        <div class="prov-actions">
+          <button onclick="connectMcp('${s.id}')">${s.status==='connected'?'Reconnect':'Connect'}</button>
+          <button onclick="editMcp('${s.id}')">Edit</button>
+          <button onclick="deleteMcp('${s.id}')">Del</button>
+        </div>
+      </div>
+    </div>`).join('')+`
+    <button class="btn-primary" onclick="editMcp()" style="margin-top:12px">+ Add MCP Server</button>
+    <div id="mcpEditor" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--outline)">
+      <input type="hidden" id="mcp_id">
+      <div class="field"><label>Name</label><input id="mcp_name" placeholder="My MCP Server"></div>
+      <div class="field"><label>URL</label><input id="mcp_url" placeholder="http://localhost:3000/sse"></div>
+      <div class="field"><label>Transport</label><select id="mcp_transport"><option value="sse">SSE</option><option value="stdio">Stdio</option></select></div>
+      <div class="field"><label><input type="checkbox" id="mcp_enabled" checked> Enabled</label></div>
+      <button class="btn-primary" onclick="saveMcp()" style="margin-top:8px">Save</button>
+    </div>`;
+}
+async function editMcp(id){
+  document.getElementById('mcpEditor').style.display='block';
+  if(id){
+    const servers=await api.get('/api/mcp/servers');
+    const s=servers.find(x=>x.id===id);
+    if(s){document.getElementById('mcp_id').value=id;document.getElementById('mcp_name').value=s.name||'';document.getElementById('mcp_url').value=s.url||'';document.getElementById('mcp_transport').value=s.transport||'sse';document.getElementById('mcp_enabled').checked=s.enabled!==false}
+  }else{document.getElementById('mcp_id').value='';document.getElementById('mcp_name').value='';document.getElementById('mcp_url').value='';document.getElementById('mcp_enabled').checked=true}
+}
+async function saveMcp(){
+  const s={id:document.getElementById('mcp_id').value,name:document.getElementById('mcp_name').value,url:document.getElementById('mcp_url').value,transport:document.getElementById('mcp_transport').value,enabled:document.getElementById('mcp_enabled').checked};
+  if(s.id)await api.put('/api/mcp/servers/'+s.id,s);else await api.post('/api/mcp/servers',s);
+  renderMcpSettings();
+}
+async function deleteMcp(id){await api.del('/api/mcp/servers/'+id);renderMcpSettings()}
+async function connectMcp(id){await api.post('/api/mcp/servers/'+id+'/connect');setTimeout(renderMcpSettings,1000)}
+
+// Tools
+const builtinTools=[
+  {id:'run_sh',label:'Shell'},
+  {id:'read_file',label:'Read File'},
+  {id:'write_file',label:'Write File'},
+  {id:'list_directory',label:'List Directory'},
+  {id:'fetch_url',label:'Fetch URL'},
+  {id:'search_web',label:'Web Search'},
+  {id:'search_images',label:'Image Search'},
+  {id:'query_data',label:'Query Data'},
+  {id:'memory_store',label:'Memory Store'},
+  {id:'memory_recall',label:'Memory Recall'},
+  {id:'memory_forget',label:'Memory Forget'},
+  {id:'image_generate',label:'Image Generate'},
+  {id:'task',label:'Subagent Task'},
+  {id:'analyze_image',label:'Analyze Image'},
+  {id:'ssh_start',label:'SSH Start'},
+  {id:'ssh_exec',label:'SSH Exec'},
+  {id:'ssh_exit',label:'SSH Exit'},
+];
+async function renderToolSettings(){
+  const body=document.getElementById('settingsBody');
+  const toggles=await api.get('/api/tools');
+  body.innerHTML=`<p style="color:var(--text-secondary);font-size:13px;margin:0 0 12px">Toggle tools on/off for the LLM.</p>`+
+    builtinTools.map(t=>{
+      const on=toggles[t.id]!==false;
+      return `<div class="toggle-row" style="padding:6px 0;border-bottom:1px solid var(--outline)">
+        <label style="flex:1;font-size:13px"><input type="checkbox" ${on?'checked':''} onchange="toggleTool('${t.id}',this.checked)"> ${t.label}</label>
+        <span style="color:var(--text-secondary);font-size:11px">${t.id}</span></div>`;
+    }).join('');
+}
+async function toggleTool(id,enabled){await api.put('/api/tools/'+id,{enabled})}
+
+// Export/Import
+function renderExportSettings(){
+  const body=document.getElementById('settingsBody');
+  body.innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div>
+        <h4 style="margin:0 0 8px;font-size:14px">Export Settings</h4>
+        <p style="color:var(--text-secondary);font-size:13px;margin:0 0 8px">Download all settings, providers, memories, and tool toggles.</p>
+        <button class="btn-primary" onclick="window.location.href='/api/settings/export'">Export</button>
+      </div>
+      <div style="border-top:1px solid var(--outline);padding-top:16px">
+        <h4 style="margin:0 0 8px;font-size:14px">Import Settings</h4>
+        <p style="color:var(--text-secondary);font-size:13px;margin:0 0 8px">Upload a previously exported settings file. This merges with existing data.</p>
+        <input type="file" id="importFile" accept=".json" style="display:none" onchange="doImport(this)">
+        <button class="btn-primary" onclick="document.getElementById('importFile').click()">Import</button>
+        <span id="importStatus" style="margin-left:12px;font-size:13px"></span>
+      </div>
+    </div>`;
+}
+async function doImport(input){
+  const file=input.files[0];if(!file)return;
+  const text=await file.text();
+  try{
+    const data=JSON.parse(text);
+    await api.post('/api/settings/import',data);
+    document.getElementById('importStatus').textContent='Imported';
+    document.getElementById('importStatus').style.color='var(--success)';
+  }catch(e){
+    document.getElementById('importStatus').textContent='Error: '+e.message;
+    document.getElementById('importStatus').style.color='var(--error)';
+  }
+}
+
+function renderThemeSettings(){
+  const body=document.getElementById('settingsBody');
+  const current=localStorage.getItem('aiope-theme')||'dark';
+  body.innerHTML=['dark','light','system'].map(t=>
+    `<div class="prov-item${current===t?' active':''}" onclick="setTheme('${t}')" style="cursor:pointer;padding:12px 16px;margin-bottom:4px">
+      <div><div class="prov-label" style="font-size:14px">${t.charAt(0).toUpperCase()+t.slice(1)}</div>
+      <div class="prov-model">${t==='system'?'Follow OS preference':t==='dark'?'Dark background, light text':'Light background, dark text'}</div></div>
+      ${current===t?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="3" style="vertical-align:-1px"><polyline points="20 6 9 17 4 12"/></svg>':''}
+    </div>`
+  ).join('');
+}
+
+function setTheme(mode){
+  localStorage.setItem('aiope-theme',mode);
+  applyTheme();
+  renderThemeSettings();
+}
+
+function applyTheme(){
+  const mode=localStorage.getItem('aiope-theme')||'dark';
+  let effective=mode;
+  if(mode==='system'){
+    effective=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark';
+  }
+  document.documentElement.setAttribute('data-theme',effective);
+  document.querySelector('meta[name=theme-color]').content=effective==='light'?'#FAFAFA':'#000000';
+  const hl=document.getElementById('hljs-theme');
+  if(hl)hl.href=effective==='light'?'https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css':'https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css';
+}
+applyTheme();
+window.matchMedia('(prefers-color-scheme:light)').addEventListener('change',()=>{
+  if(localStorage.getItem('aiope-theme')==='system')applyTheme();
+});
+
 // Init
+// Float input above mobile keyboard
+if(window.visualViewport){
+  const ia=document.querySelector('.input-area');
+  function onVPResize(){
+    const vp=window.visualViewport;
+    const diff=window.innerHeight-vp.height;
+    if(diff>100){
+      ia.style.position='fixed';
+      ia.style.bottom=(window.innerHeight-vp.height-vp.offsetTop)+'px';
+      ia.style.left='0';ia.style.right='0';ia.style.zIndex='50';
+      document.querySelector('.messages').style.paddingBottom=(ia.offsetHeight+diff)+'px';
+    }else{
+      ia.style.position='';ia.style.bottom='';ia.style.left='';ia.style.right='';ia.style.zIndex='';
+      document.querySelector('.messages').style.paddingBottom='';
+    }
+  }
+  visualViewport.addEventListener('resize',onVPResize);
+  visualViewport.addEventListener('scroll',onVPResize);
+}
+
 async function init(){
   S.convs=await api.get('/api/conversations')||[];
-  renderSidebar();connectWS();
+  connectWS();
+  // Always have one empty conv on top — reuse or create
+  if(S.convs.length>0){
+    const top=S.convs[0];
+    const data=await api.get('/api/conversations/'+top.id);
+    if(!data.messages||data.messages.length===0){
+      S.active=top.id;
+      document.getElementById('chatTitle').textContent='AIOPE';
+    }else{
+      await newChat();
+    }
+  }else{
+    await newChat();
+  }
+  renderSidebar();
+  loadModelLabel();
   document.getElementById('input').focus();
 }
 init();

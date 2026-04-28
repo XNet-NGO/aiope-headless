@@ -52,8 +52,13 @@ type Provider interface {
 }
 
 type OpenAI struct {
-	APIKey  string
-	APIBase string
+	APIKey          string
+	APIBase         string
+	EndpointOverride string
+	Temperature     *float64
+	TopP            *float64
+	MaxTokens       *int
+	ReasoningEffort *string
 }
 
 func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, onEvent func(StreamEvent)) error {
@@ -66,6 +71,18 @@ func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, o
 		"model":    model,
 		"stream":   true,
 		"messages": messages,
+	}
+	if o.Temperature != nil {
+		body["temperature"] = *o.Temperature
+	}
+	if o.TopP != nil {
+		body["top_p"] = *o.TopP
+	}
+	if o.MaxTokens != nil {
+		body["max_tokens"] = *o.MaxTokens
+	}
+	if o.ReasoningEffort != nil && *o.ReasoningEffort != "" {
+		body["reasoning_effort"] = *o.ReasoningEffort
 	}
 	if len(tools) > 0 {
 		tdefs := make([]map[string]any, len(tools))
@@ -83,7 +100,11 @@ func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, o
 	}
 
 	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", strings.TrimRight(base, "/")+"/chat/completions", bytes.NewReader(data))
+	endpoint := "/chat/completions"
+	if o.EndpointOverride != "" {
+		endpoint = o.EndpointOverride
+	}
+	req, _ := http.NewRequest("POST", strings.TrimRight(base, "/")+endpoint, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	if o.APIKey != "" {

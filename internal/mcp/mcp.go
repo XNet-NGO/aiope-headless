@@ -46,14 +46,41 @@ type Manager struct {
 	toolCache map[string][]ToolMeta // serverId -> tools
 	toolMap   map[string]string     // toolName -> serverId
 	reqID     atomic.Int64
+	stopHB    chan struct{}
 }
 
 func NewManager(db *sql.DB) *Manager {
-	return &Manager{
+	m := &Manager{
 		DB:        db,
 		sessions:  map[string]string{},
 		toolCache: map[string][]ToolMeta{},
 		toolMap:   map[string]string{},
+		stopHB:    make(chan struct{}),
+	}
+	go m.heartbeatLoop()
+	return m
+}
+
+func (m *Manager) heartbeatLoop() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			m.mu.RLock()
+			var connected []ServerConfig
+			for _, s := range m.ListServers() {
+				if _, ok := m.sessions[s.ID]; ok && s.Enabled {
+					connected = append(connected, s)
+				}
+			}
+			m.mu.RUnlock()
+			for _, s := range connected {
+				m.sendNotification(s, "notifications/ping")
+			}
+		case <-m.stopHB:
+			return
+		}
 	}
 }
 

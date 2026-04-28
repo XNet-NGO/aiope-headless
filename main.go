@@ -14,6 +14,7 @@ import (
 	"github.com/XNet-NGO/AIOPE-Headless/internal/mcp"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/message"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/remote"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/server"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/ws"
@@ -48,6 +49,9 @@ func main() {
 
 	webFS, _ := fs.Sub(webEmbed, "web")
 
+	remoteSvc := remote.NewService(database)
+	remoteSvc.SeedFromSSHConfig()
+
 	srv := &server.Server{
 		Conversations: &conversation.Service{DB: database},
 		Messages:      &message.Service{DB: database},
@@ -59,6 +63,7 @@ func main() {
 		WebFS:         webFS,
 		DB:            database,
 		MCP:           mcp.NewManager(database),
+		Remote:        remoteSvc,
 	}
 
 	log.Fatal(server.ListenAndServe(cfg.Bind, cfg.Port, srv.Handler()))
@@ -69,11 +74,17 @@ func seedDefaults(svc *provider.Service, database *sql.DB) {
 	if v := os.Getenv("AIOPE_GATEWAY_KEY"); v != "" {
 		key = v
 	}
-	mc := func(id string, tools bool, vision bool, ctx int) provider.ModelConfig {
-		t := &tools
-		return provider.ModelConfig{ModelID: id, ContextTokens: ctx, ToolsOverride: t}
+	boolPtr := func(b bool) *bool { return &b }
+	f64Ptr := func(f float64) *float64 { return &f }
+	strPtr := func(s string) *string { return &s }
+	mc := func(id string, tools, vision bool, ctx int, reasoning *string) provider.ModelConfig {
+		return provider.ModelConfig{
+			ModelID: id, ToolsOverride: boolPtr(tools), VisionOverride: boolPtr(vision),
+			Temperature: f64Ptr(0.6), ReasoningEffort: reasoning,
+			ContextTokens: ctx, AutoCompact: true,
+		}
 	}
-	_ = mc // used below
+	auto := strPtr("auto")
 	p := &provider.Profile{
 		ID:              "default_gateway",
 		BuiltinID:       "aiope_gateway",
@@ -83,23 +94,49 @@ func seedDefaults(svc *provider.Service, database *sql.DB) {
 		SelectedModelID: "google-ai-studio/models-gemma-4-31b-it",
 		IsActive:        true,
 		ModelConfigs: map[string]provider.ModelConfig{
-			"google-ai-studio/models-gemma-4-31b-it":    mc("google-ai-studio/models-gemma-4-31b-it", true, true, 256000),
-			"google-ai-studio/models-gemma-4-26b-a4b-it": mc("google-ai-studio/models-gemma-4-26b-a4b-it", true, true, 256000),
-			"google-ai-studio/models-gemma-3-27b-it":    mc("google-ai-studio/models-gemma-3-27b-it", false, true, 128000),
-			"google-ai-studio/models-gemma-3-12b-it":    mc("google-ai-studio/models-gemma-3-12b-it", false, true, 128000),
-			"google-ai-studio/models-gemma-3-4b-it":     mc("google-ai-studio/models-gemma-3-4b-it", false, true, 128000),
-			"google-ai-studio/models-gemma-3-1b-it":     mc("google-ai-studio/models-gemma-3-1b-it", false, false, 32000),
-			"cline/minimax-minimax-m2.5":                mc("cline/minimax-minimax-m2.5", true, false, 200000),
-			"zen/minimax-m2.5-free":                     mc("zen/minimax-m2.5-free", true, false, 200000),
-			"zen/nemotron-3-super-free":                 mc("zen/nemotron-3-super-free", true, false, 1000000),
-			"zen/big-pickle":                            mc("zen/big-pickle", true, false, 200000),
-			"cline/z-ai-glm-5":                         mc("cline/z-ai-glm-5", true, false, 200000),
-			"openrouter/openrouter-free":                mc("openrouter/openrouter-free", false, true, 128000),
-			"pollinations/openai":                       mc("pollinations/openai", true, false, 128000),
-			"pollinations/openai-fast":                  mc("pollinations/openai-fast", true, false, 128000),
+			"google-ai-studio/models-gemma-4-31b-it":    mc("google-ai-studio/models-gemma-4-31b-it", true, true, 256000, auto),
+			"google-ai-studio/models-gemma-4-26b-a4b-it": mc("google-ai-studio/models-gemma-4-26b-a4b-it", true, true, 256000, auto),
+			"google-ai-studio/models-gemma-3-27b-it":    mc("google-ai-studio/models-gemma-3-27b-it", false, true, 128000, auto),
+			"google-ai-studio/models-gemma-3-12b-it":    mc("google-ai-studio/models-gemma-3-12b-it", false, true, 128000, nil),
+			"google-ai-studio/models-gemma-3-4b-it":     mc("google-ai-studio/models-gemma-3-4b-it", false, true, 128000, nil),
+			"google-ai-studio/models-gemma-3-1b-it":     mc("google-ai-studio/models-gemma-3-1b-it", false, false, 32000, nil),
+			"google-ai-studio/models-gemma-3n-e2b-it":   mc("google-ai-studio/models-gemma-3n-e2b-it", false, true, 128000, auto),
+			"google-ai-studio/models-gemma-3n-e4b-it":   mc("google-ai-studio/models-gemma-3n-e4b-it", false, true, 128000, auto),
+			"cline/minimax-minimax-m2.5":                mc("cline/minimax-minimax-m2.5", true, false, 200000, auto),
+			"zen/minimax-m2.5-free":                     mc("zen/minimax-m2.5-free", true, false, 200000, auto),
+			"zen/nemotron-3-super-free":                 mc("zen/nemotron-3-super-free", true, false, 1000000, auto),
+			"zen/big-pickle":                            mc("zen/big-pickle", true, false, 200000, auto),
+			"cline/z-ai-glm-5":                         mc("cline/z-ai-glm-5", true, false, 200000, auto),
+			"openrouter/openrouter-free":                mc("openrouter/openrouter-free", false, true, 128000, auto),
+			"pollinations/openai":                       mc("pollinations/openai", true, false, 128000, auto),
+			"pollinations/openai-fast":                  mc("pollinations/openai-fast", true, false, 128000, auto),
 		},
 	}
 	svc.Create(p)
+	// If provider exists but key/base got wiped, restore them
+	if existing, err := svc.Get(p.ID); err == nil {
+		changed := false
+		if existing.APIKey == "" {
+			existing.APIKey = p.APIKey
+			changed = true
+		}
+		if existing.APIBase == "" {
+			existing.APIBase = p.APIBase
+			changed = true
+		}
+		if existing.Label == "" {
+			existing.Label = p.Label
+			changed = true
+		}
+		if existing.ModelConfigs == nil || len(existing.ModelConfigs) == 0 {
+			existing.ModelConfigs = p.ModelConfigs
+			changed = true
+		}
+		if changed {
+			log.Printf("seed: restoring provider %s (key=%d base=%s)", p.ID, len(existing.APIKey), existing.APIBase)
+			svc.Update(existing)
+		}
+	}
 	svc.SetActive(p.ID)
 
 	// Seed task model defaults

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -65,11 +66,12 @@ var BuiltinTools = []ToolDef{
 		},
 	},
 	{
-		Name: "fetch_url", Description: "Fetch the text content of a URL",
+		Name: "fetch_url", Description: "Fetch a URL. Returns extracted text and images as ![alt](url) markdown from HTML pages. Use mode='raw' for raw response.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"url": map[string]any{"type": "string", "description": "URL to fetch"},
+				"url":  map[string]any{"type": "string", "description": "URL to fetch"},
+				"mode": map[string]any{"type": "string", "description": "Optional: 'raw' for raw response, 'text' (default) for extracted text+images"},
 			},
 			"required": []string{"url"},
 		},
@@ -210,7 +212,11 @@ type ToolContext struct {
 	ShellOutputLimit int
 	FetchLimit       int
 	FileReadLimit    int
-	McpExecutor      func(name string, args map[string]any) (string, bool) // returns result, handled
+	McpExecutor      func(name string, args map[string]any) (string, bool)
+	SSHStart         func(server string) (string, error)
+	SSHExec          func(server, command string, timeout int) (string, error)
+	SSHExit          func(server string) error
+	OnProgress       func(toolName, status string) // stream tool progress to client
 }
 
 func (ctx *ToolContext) shellLimit() int {
@@ -315,14 +321,29 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 
 	case "fetch_url":
 		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(str("url"))
+		req, _ := http.NewRequest("GET", str("url"), nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Linux) AIOPE/2.0")
+		resp, err := client.Do(req)
 		if err != nil {
 			return "", err
 		}
 		defer resp.Body.Close()
 		lim := ctx.fetchLim()
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(lim)))
-		return string(data), nil
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, int64(lim*2)))
+		body := string(data)
+		ct := resp.Header.Get("Content-Type")
+		mode := str("mode")
+		if mode == "raw" || !strings.Contains(ct, "html") {
+			if len(body) > lim {
+				body = body[:lim] + "\n...(truncated)"
+			}
+			return body, nil
+		}
+		result := stripHTML(str("url"), body)
+		if len(result) > lim {
+			result = result[:lim] + "\n...(truncated)"
+		}
+		return result, nil
 
 	case "search_web":
 		return queryGateway(ctx, "search_web", str("query"))
@@ -396,6 +417,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 
 	case "ssh_start":
 		server := str("server")
+		if ctx.SSHStart != nil {
+			return ctx.SSHStart(server)
+		}
 		client, err := sshConnect(server)
 		if err != nil {
 			return "", err
@@ -409,10 +433,17 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		if t, ok := args["timeout"].(float64); ok && t > 0 {
 			timeout = int(t)
 		}
+		if ctx.SSHExec != nil {
+			return ctx.SSHExec(server, command, timeout)
+		}
 		return sshExec(server, command, timeout)
 
 	case "ssh_exit":
 		server := str("server")
+		if ctx.SSHExit != nil {
+			ctx.SSHExit(server)
+			return fmt.Sprintf(`{"status":"disconnected","server":"%s"}`, server), nil
+		}
 		sshDisconnect(server)
 		return fmt.Sprintf(`{"status":"disconnected","server":"%s"}`, server), nil
 
@@ -603,7 +634,15 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 		Model:    model,
 		Tools:    tools,
 		ToolCtx:  subCtx,
-		OnEvent:  func(ev StreamEvent) {}, // silent
+		OnEvent: func(ev StreamEvent) {
+			if ctx.OnProgress != nil {
+				if ev.Delta != "" {
+					ctx.OnProgress("task", "streaming")
+				} else if len(ev.ToolCalls) > 0 {
+					ctx.OnProgress("task", "tool:"+ev.ToolCalls[0].Name)
+				}
+			}
+		},
 	}
 
 	result, err := orch.Run(msgs)
@@ -614,4 +653,84 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 		return "<task_result>No results found.</task_result>", nil
 	}
 	return fmt.Sprintf("<task_result>\n%s\n</task_result>", result), nil
+}
+
+var reTag = regexp.MustCompile(`<[^>]+>`)
+var reSpaces = regexp.MustCompile(`[ \t]+`)
+var reBlankLines = regexp.MustCompile(`\n{3,}`)
+var reImg = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?`)
+var reOG = regexp.MustCompile(`(?i)<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']`)
+
+func stripHTML(rawURL, body string) string {
+	u, _ := url.Parse(rawURL)
+	base := ""
+	if u != nil {
+		base = u.Scheme + "://" + u.Host
+	}
+	absURL := func(src string) string {
+		if strings.HasPrefix(src, "http") {
+			return src
+		}
+		if strings.HasPrefix(src, "/") {
+			return base + src
+		}
+		return base + "/" + src
+	}
+	// Extract images
+	var imgs []string
+	seen := map[string]bool{}
+	for _, m := range reImg.FindAllStringSubmatch(body, -1) {
+		src := absURL(m[1])
+		if seen[src] {
+			continue
+		}
+		seen[src] = true
+		alt := "image"
+		if len(m) > 2 && m[2] != "" {
+			alt = m[2]
+			if len(alt) > 80 {
+				alt = alt[:80]
+			}
+		}
+		imgs = append(imgs, fmt.Sprintf("![%s](%s)", alt, src))
+	}
+	for _, m := range reOG.FindAllStringSubmatch(body, -1) {
+		src := absURL(m[1])
+		if !seen[src] {
+			imgs = append(imgs, fmt.Sprintf("![og:image](%s)", src))
+			seen[src] = true
+		}
+	}
+	if len(imgs) > 20 {
+		imgs = imgs[:20]
+	}
+	// Strip tags
+	text := body
+	// Remove script/style/nav/footer/header blocks
+	for _, tag := range []string{"script", "style", "nav", "footer", "header"} {
+		re := regexp.MustCompile(`(?is)<` + tag + `\b[^>]*>.*?</` + tag + `>`)
+		text = re.ReplaceAllString(text, "")
+	}
+	text = reTag.ReplaceAllString(text, " ")
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+	text = reSpaces.ReplaceAllString(text, " ")
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	text = strings.Join(out, "\n")
+	text = reBlankLines.ReplaceAllString(text, "\n\n")
+	if len(imgs) > 0 {
+		return strings.Join(imgs, "\n") + "\n\n" + text
+	}
+	return text
 }

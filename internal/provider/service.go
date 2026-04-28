@@ -12,19 +12,21 @@ import (
 )
 
 type ModelConfig struct {
-	ModelID          string   `json:"modelId"`
-	ToolsOverride    *bool    `json:"toolsOverride,omitempty"`
-	VisionOverride   *bool    `json:"visionOverride,omitempty"`
-	Temperature      *float64 `json:"temperature,omitempty"`
-	TopP             *float64 `json:"topP,omitempty"`
-	TopK             *int     `json:"topK,omitempty"`
-	MaxTokens        *int     `json:"maxTokens,omitempty"`
-	ContextTokens    int      `json:"contextTokens"`
-	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
-	AutoCompact      bool     `json:"autoCompact,omitempty"`
-	ShellOutputLimit int      `json:"shellOutputLimit,omitempty"`
-	FetchLimit       int      `json:"fetchLimit,omitempty"`
-	FileReadLimit    int      `json:"fileReadLimit,omitempty"`
+	ModelID              string   `json:"modelId"`
+	ToolsOverride        *bool    `json:"toolsOverride,omitempty"`
+	VisionOverride       *bool    `json:"visionOverride,omitempty"`
+	Temperature          *float64 `json:"temperature,omitempty"`
+	TopP                 *float64 `json:"topP,omitempty"`
+	TopK                 *int     `json:"topK,omitempty"`
+	MaxTokens            *int     `json:"maxTokens,omitempty"`
+	ContextTokens        int      `json:"contextTokens"`
+	ReasoningEffort      *string  `json:"reasoningEffort,omitempty"`
+	AutoCompact          bool     `json:"autoCompact,omitempty"`
+	ShellOutputLimit     int      `json:"shellOutputLimit,omitempty"`
+	FetchLimit           int      `json:"fetchLimit,omitempty"`
+	FileReadLimit        int      `json:"fileReadLimit,omitempty"`
+	SystemPromptOverride string   `json:"systemPromptOverride,omitempty"`
+	EndpointOverride     string   `json:"endpointOverride,omitempty"`
 }
 
 type Profile struct {
@@ -72,6 +74,20 @@ func (s *Service) GetActive() *Profile {
 	p.ID = id
 	p.IsActive = true
 	return &p
+}
+
+func (s *Service) Get(id string) (*Profile, error) {
+	var j string
+	var isActive bool
+	err := s.DB.QueryRow("SELECT json,isActive FROM providers WHERE id=?", id).Scan(&j, &isActive)
+	if err != nil {
+		return nil, err
+	}
+	var p Profile
+	json.Unmarshal([]byte(j), &p)
+	p.ID = id
+	p.IsActive = isActive
+	return &p, nil
 }
 
 func (s *Service) Create(p *Profile) error {

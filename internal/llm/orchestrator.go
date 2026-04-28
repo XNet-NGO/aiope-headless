@@ -180,9 +180,55 @@ func trimToolResults(msgs []ChatMessage) {
 	}
 }
 
-// EstimateTokens approximates token count (~4 chars per token for English).
+// EstimateTokens approximates BPE token count.
+// Counts words (split on whitespace/punctuation) and adds overhead for subword splits.
+// ~1.3 tokens per word for English, plus 1 token per standalone punctuation/number group.
 func EstimateTokens(s string) int {
-	return (len(s) + 3) / 4
+	if len(s) == 0 {
+		return 0
+	}
+	tokens := 0
+	inWord := false
+	wordLen := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\n' || c == '\t' || c == '\r' {
+			if inWord {
+				// Short words ~1 token, longer words get split into subwords
+				if wordLen <= 4 {
+					tokens++
+				} else {
+					tokens += (wordLen + 3) / 4
+				}
+				inWord = false
+				wordLen = 0
+			}
+		} else {
+			if !inWord {
+				inWord = true
+				wordLen = 0
+			}
+			wordLen++
+			// Punctuation/special chars are often their own token
+			if c == '.' || c == ',' || c == '!' || c == '?' || c == ':' || c == ';' || c == '{' || c == '}' || c == '[' || c == ']' || c == '(' || c == ')' || c == '"' || c == '\'' {
+				if wordLen > 1 {
+					tokens += (wordLen - 1 + 3) / 4
+				}
+				tokens++
+				inWord = false
+				wordLen = 0
+			}
+		}
+	}
+	if inWord {
+		if wordLen <= 4 {
+			tokens++
+		} else {
+			tokens += (wordLen + 3) / 4
+		}
+	}
+	// Add ~3% overhead for BPE special tokens
+	return tokens + tokens/30 + 3
 }
 
 // MarshalJSON for ChatMessage to handle nil content for tool_calls messages
