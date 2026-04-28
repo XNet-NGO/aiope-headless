@@ -666,9 +666,12 @@ function renderModelConfig(){
   document.getElementById('mcFields').innerHTML=`
     <div class="section-label">Abilities</div>
     <div class="toggle-row">
+      <label><input type="checkbox" id="mc_auto" ${mc.toolsOverride==null&&mc.visionOverride==null?'checked':''} onchange="document.getElementById('mc_overrides').style.display=this.checked?'none':'flex';updateMC()"> Auto-detect</label>
+      <label><input type="checkbox" id="mc_compact" ${mc.autoCompact!==false?'checked':''} onchange="updateMC()"> Auto-Compact</label>
+    </div>
+    <div class="toggle-row" id="mc_overrides" style="display:${mc.toolsOverride==null&&mc.visionOverride==null?'none':'flex'}">
       <label><input type="checkbox" id="mc_tools" ${mc.toolsOverride!==false?'checked':''} onchange="updateMC()"> Tool Calling</label>
       <label><input type="checkbox" id="mc_vision" ${mc.visionOverride?'checked':''} onchange="updateMC()"> Vision</label>
-      <label><input type="checkbox" id="mc_compact" ${mc.autoCompact!==false?'checked':''} onchange="updateMC()"> Auto-Compact</label>
     </div>
 
     <div class="section-label">Reasoning</div>
@@ -719,8 +722,8 @@ function updateMC(){
     topK:topk>0?topk:null,
     maxTokens:TOKEN_STEPS[maxTokIdx]||null,
     reasoningEffort:reason==='off'?null:reason,
-    toolsOverride:document.getElementById('mc_tools').checked,
-    visionOverride:document.getElementById('mc_vision').checked,
+    toolsOverride:document.getElementById('mc_auto').checked?null:document.getElementById('mc_tools').checked,
+    visionOverride:document.getElementById('mc_auto').checked?null:document.getElementById('mc_vision').checked,
     autoCompact:document.getElementById('mc_compact').checked,
   };
 }
