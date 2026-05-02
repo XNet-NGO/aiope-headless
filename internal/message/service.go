@@ -2,23 +2,25 @@ package message
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type Message struct {
-	ID             string `json:"id"`
-	ConversationID string `json:"conversationId"`
-	Role           string `json:"role"`
-	Content        string `json:"content"`
-	Timestamp      int64  `json:"timestamp"`
+	ID             string   `json:"id"`
+	ConversationID string   `json:"conversationId"`
+	Role           string   `json:"role"`
+	Content        string   `json:"content"`
+	ImagePaths     []string `json:"imagePaths,omitempty"`
+	Timestamp      int64    `json:"timestamp"`
 }
 
 type Service struct{ DB *sql.DB }
 
 func (s *Service) List(convID string) ([]Message, error) {
-	rows, err := s.DB.Query("SELECT id,conversationId,role,content,timestamp FROM messages WHERE conversationId=? ORDER BY timestamp ASC", convID)
+	rows, err := s.DB.Query("SELECT id,conversationId,role,content,imagePaths,timestamp FROM messages WHERE conversationId=? ORDER BY timestamp ASC", convID)
 	if err != nil {
 		return nil, err
 	}
@@ -26,17 +28,26 @@ func (s *Service) List(convID string) ([]Message, error) {
 	var out []Message
 	for rows.Next() {
 		var m Message
-		rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.Timestamp)
+		var imgJSON string
+		rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &imgJSON, &m.Timestamp)
+		if imgJSON != "" {
+			json.Unmarshal([]byte(imgJSON), &m.ImagePaths)
+		}
 		out = append(out, m)
 	}
 	return out, nil
 }
 
-func (s *Service) Add(convID, role, content string) (*Message, error) {
+func (s *Service) Add(convID, role, content string, imagePaths ...string) (*Message, error) {
 	now := time.Now().UnixMilli()
-	m := &Message{ID: uuid.NewString(), ConversationID: convID, Role: role, Content: content, Timestamp: now}
-	_, err := s.DB.Exec("INSERT INTO messages(id,conversationId,role,content,imagePaths,timestamp) VALUES(?,?,?,?,'',?)",
-		m.ID, m.ConversationID, m.Role, m.Content, m.Timestamp)
+	imgJSON := ""
+	if len(imagePaths) > 0 {
+		b, _ := json.Marshal(imagePaths)
+		imgJSON = string(b)
+	}
+	m := &Message{ID: uuid.NewString(), ConversationID: convID, Role: role, Content: content, ImagePaths: imagePaths, Timestamp: now}
+	_, err := s.DB.Exec("INSERT INTO messages(id,conversationId,role,content,imagePaths,timestamp) VALUES(?,?,?,?,?,?)",
+		m.ID, m.ConversationID, m.Role, m.Content, imgJSON, m.Timestamp)
 	return m, err
 }
 

@@ -25,52 +25,52 @@ var ParallelSafe = map[string]bool{
 
 var BuiltinTools = []ToolDef{
 	{
-		Name: "run_sh", Description: "Execute a shell command and return stdout+stderr",
+		Name: "run_sh", Description: "Execute shell command",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+				"command": map[string]any{"type": "string"},
 			},
 			"required": []string{"command"},
 		},
 	},
 	{
-		Name: "read_file", Description: "Read the contents of a file",
+		Name: "read_file", Description: "Read file contents",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string", "description": "File path to read"},
+				"path": map[string]any{"type": "string"},
 			},
 			"required": []string{"path"},
 		},
 	},
 	{
-		Name: "write_file", Description: "Write content to a file, creating directories as needed",
+		Name: "write_file", Description: "Write file",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string", "description": "File path to write"},
-				"content": map[string]any{"type": "string", "description": "Content to write"},
+				"path":    map[string]any{"type": "string"},
+				"content": map[string]any{"type": "string"},
 			},
 			"required": []string{"path", "content"},
 		},
 	},
 	{
-		Name: "list_directory", Description: "List files and directories at a path",
+		Name: "list_directory", Description: "List directory",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string", "description": "Directory path to list"},
+				"path": map[string]any{"type": "string"},
 			},
 			"required": []string{"path"},
 		},
 	},
 	{
-		Name: "fetch_url", Description: "Fetch a URL. Returns extracted text and images as ![alt](url) markdown from HTML pages. Use mode='raw' for raw response.",
+		Name: "fetch_url", Description: "Fetch a URL. Returns extracted text and images as ![alt](url) markdown from HTML pages.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"url":  map[string]any{"type": "string", "description": "URL to fetch"},
+				"url":  map[string]any{"type": "string"},
 				"mode": map[string]any{"type": "string", "description": "Optional: 'raw' for raw response, 'text' (default) for extracted text+images"},
 			},
 			"required": []string{"url"},
@@ -81,7 +81,7 @@ var BuiltinTools = []ToolDef{
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Search query"},
+				"query": map[string]any{"type": "string"},
 			},
 			"required": []string{"query"},
 		},
@@ -91,28 +91,28 @@ var BuiltinTools = []ToolDef{
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Image search query"},
+				"query": map[string]any{"type": "string"},
 			},
 			"required": []string{"query"},
 		},
 	},
 	{
-		Name: "query_data", Description: "Query live real-time data from the AIOPE Gateway. Returns JSON. Available categories: air_quality, alerts, apod, asteroids, astronauts, cat, cat_breed, cat_breeds, cme, earth_events, earth_image, earthquakes, earthquakes_significant, epic, fires, geomagnetic, impact_risk, ip_location, iss, nasa_media, nasa_tech, ocean_temp, solar, solar_flares, sunrise_sunset, tides, time, uv, weather, weather_hourly",
+		Name: "query_data", Description: "Query live real-time data. Returns JSON and images as ![alt](url) markdown. Pass 'extra' for searches or station/breed IDs. Available categories: air_quality, alerts, apod, asteroids, astronauts, cat, cat_breed, cat_breeds, cme, earth_events, earth_image, earthquakes, earthquakes_significant, epic, fires, geomagnetic, impact_risk, ip_location, iss, nasa_media, nasa_tech, ocean_temp, solar, solar_flares, sunrise_sunset, tides, time, uv, weather, weather_hourly",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"category": map[string]any{"type": "string", "description": "Data category"},
+				"category": map[string]any{"type": "string"},
 				"extra":    map[string]any{"type": "string", "description": "Optional: search query, station ID, or breed ID depending on category"},
 			},
 			"required": []string{"category"},
 		},
 	},
 	{
-		Name: "memory_store", Description: "Store a fact or preference to remember across conversations. Use a short descriptive key.",
+		Name: "memory_store", Description: "Store a fact or preference to remember across conversations",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"key":      map[string]any{"type": "string", "description": "Short key like 'user_name' or 'preferred_language'"},
+				"key":      map[string]any{"type": "string", "description": "Short key like 'user_name'"},
 				"content":  map[string]any{"type": "string", "description": "The fact to remember"},
 				"category": map[string]any{"type": "string", "description": "Optional: general, preference, learning, error"},
 			},
@@ -120,85 +120,85 @@ var BuiltinTools = []ToolDef{
 		},
 	},
 	{
-		Name: "memory_recall", Description: "Search persistent memory for stored facts. Empty query lists all memories.",
+		Name: "memory_recall", Description: "Search persistent memory. Empty query lists all.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query": map[string]any{"type": "string", "description": "Search term, or empty to list all"},
+				"query": map[string]any{"type": "string"},
 			},
 			"required": []string{"query"},
 		},
 	},
 	{
-		Name: "memory_forget", Description: "Delete a specific memory by its key.",
+		Name: "memory_forget", Description: "Delete a memory by key",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"key": map[string]any{"type": "string", "description": "Key of the memory to delete"},
+				"key": map[string]any{"type": "string"},
 			},
 			"required": []string{"key"},
 		},
 	},
 	{
-		Name: "image_generate", Description: "Generate an image from a text prompt. Returns a URL to the generated image. Include the URL in your response as ![description](url) to display it.",
+		Name: "image_generate", Description: "Generate an image from a text prompt. Returns a URL. Include as ![desc](url) to display.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"prompt": map[string]any{"type": "string", "description": "Detailed image generation prompt"},
+				"prompt": map[string]any{"type": "string"},
 			},
 			"required": []string{"prompt"},
 		},
 	},
 	{
-		Name: "task", Description: "Delegate a research task to a subagent. The subagent has read-only tools (search, read, fetch) and returns a summary. Use for parallel research.",
+		Name: "task", Description: "Spawn a subagent to research a topic. Has read-only tools (search, fetch, read). Returns a text summary. Use for parallel research — call multiple tasks at once for different topics.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"description": map[string]any{"type": "string", "description": "Brief description of the research task"},
-				"prompt":      map[string]any{"type": "string", "description": "Detailed prompt for the subagent"},
+				"description": map[string]any{"type": "string", "description": "Short 3-5 word description"},
+				"prompt":      map[string]any{"type": "string", "description": "Detailed instructions for the subagent"},
 			},
 			"required": []string{"description", "prompt"},
 		},
 	},
 	{
-		Name: "analyze_image", Description: "Analyze an image from a URL or local file path using vision. Returns a description or answers a question about the image.",
+		Name: "analyze_image", Description: "Analyze an image from a URL or file path using vision",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"url":      map[string]any{"type": "string", "description": "URL or local file path of the image to analyze"},
-				"question": map[string]any{"type": "string", "description": "What to look for or ask about the image"},
+				"url":      map[string]any{"type": "string", "description": "URL or local file path"},
+				"question": map[string]any{"type": "string", "description": "What to look for in the image"},
 			},
 			"required": []string{"url"},
 		},
 	},
 	{
-		Name: "ssh_start", Description: "Open persistent SSH session to a remote server. Resolves from ~/.ssh/config or connects by hostname. Returns connection status.",
+		Name: "ssh_start", Description: "Open SSH session to a remote server",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"server": map[string]any{"type": "string", "description": "Server name (from ~/.ssh/config) or hostname"},
+				"server": map[string]any{"type": "string"},
 			},
 			"required": []string{"server"},
 		},
 	},
 	{
-		Name: "ssh_exec", Description: "Execute a command on an active remote SSH session. Returns stdout+stderr. Use ssh_start first.",
+		Name: "ssh_exec", Description: "Run command on active SSH session. Use ssh_start first.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"server":  map[string]any{"type": "string", "description": "Server name"},
-				"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+				"server":  map[string]any{"type": "string"},
+				"command": map[string]any{"type": "string"},
 				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 30)"},
 			},
 			"required": []string{"server", "command"},
 		},
 	},
 	{
-		Name: "ssh_exit", Description: "Close an active SSH session.",
+		Name: "ssh_exit", Description: "Close SSH session",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"server": map[string]any{"type": "string", "description": "Server name"},
+				"server": map[string]any{"type": "string"},
 			},
 			"required": []string{"server"},
 		},
@@ -217,6 +217,7 @@ type ToolContext struct {
 	SSHExec          func(server, command string, timeout int) (string, error)
 	SSHExit          func(server string) error
 	OnProgress       func(toolName, status string) // stream tool progress to client
+	GeneratedImages  []string                     // local paths of generated images
 }
 
 func (ctx *ToolContext) shellLimit() int {
@@ -298,6 +299,9 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 
 	case "write_file":
 		p := str("path")
+		if p == "" {
+			return "Error: path is required", nil
+		}
 		os.MkdirAll(filepath.Dir(p), 0755)
 		if err := os.WriteFile(p, []byte(str("content")), 0644); err != nil {
 			return "", err
@@ -494,7 +498,7 @@ func generateImage(ctx *ToolContext, prompt string) (string, error) {
 	base = strings.TrimSuffix(base, "/chat/completions")
 	base = strings.TrimSuffix(base, "/v1")
 
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","response_format":"url","seed":%d}`,
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","response_format":"b64_json","seed":%d}`,
 		model, strings.ReplaceAll(prompt, `"`, `\"`), time.Now().UnixMilli())
 
 	req, _ := http.NewRequest("POST", base+"/v1/images/generations", strings.NewReader(body))
@@ -503,7 +507,7 @@ func generateImage(ctx *ToolContext, prompt string) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
 	}
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -514,6 +518,7 @@ func generateImage(ctx *ToolContext, prompt string) (string, error) {
 		return "", fmt.Errorf("image gen %d: %s", resp.StatusCode, string(data))
 	}
 
+	// Parse response — try b64_json first, then URL download
 	var result struct {
 		Data []struct {
 			URL     string `json:"url"`
@@ -521,10 +526,44 @@ func generateImage(ctx *ToolContext, prompt string) (string, error) {
 		} `json:"data"`
 	}
 	json.Unmarshal(data, &result)
-	if len(result.Data) > 0 && result.Data[0].URL != "" {
-		return fmt.Sprintf("Image generated!\n![generated image](%s)", result.Data[0].URL), nil
+	if len(result.Data) == 0 {
+		return "", fmt.Errorf("no image in response: %s", string(data)[:min(len(data), 200)])
 	}
-	return "", fmt.Errorf("no image in response: %s", string(data)[:200])
+
+	var imgBytes []byte
+	if b64 := result.Data[0].B64JSON; b64 != "" {
+		imgBytes, _ = base64.StdEncoding.DecodeString(b64)
+	} else if u := result.Data[0].URL; u != "" {
+		dlReq, _ := http.NewRequest("GET", u, nil)
+		if ctx.GatewayKey != "" {
+			dlReq.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
+		}
+		dlResp, err := client.Do(dlReq)
+		if err == nil {
+			defer dlResp.Body.Close()
+			if dlResp.StatusCode == 200 {
+				imgBytes, _ = io.ReadAll(dlResp.Body)
+			}
+		}
+	}
+
+	if len(imgBytes) == 0 {
+		return "", fmt.Errorf("failed to download generated image")
+	}
+
+	dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "generated")
+	os.MkdirAll(dir, 0755)
+	fname := fmt.Sprintf("img_%d.png", time.Now().UnixMilli())
+	fpath := filepath.Join(dir, fname)
+	os.WriteFile(fpath, imgBytes, 0644)
+	// Copy to user-visible location — model can move/rename this freely
+	userDir := filepath.Join(os.Getenv("HOME"), "generated-images")
+	os.MkdirAll(userDir, 0755)
+	userPath := filepath.Join(userDir, fname)
+	os.WriteFile(userPath, imgBytes, 0644)
+	ctx.GeneratedImages = append(ctx.GeneratedImages, fpath)
+	localURL := fmt.Sprintf("/api/upload?path=%s", fpath)
+	return fmt.Sprintf("Image generated and saved to %s\nDisplay with: ![image](%s)", userPath, localURL), nil
 }
 
 func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {

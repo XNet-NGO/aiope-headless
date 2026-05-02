@@ -27,10 +27,38 @@ import (
 	"github.com/XNet-NGO/AIOPE-Headless/internal/provider"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/remote"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/settings"
+	"github.com/XNet-NGO/AIOPE-Headless/internal/terminal"
 	"github.com/XNet-NGO/AIOPE-Headless/internal/ws"
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 )
+
+const defaultSystemPrompt = `## Identity
+You are AIOPE, a personal intelligent agent running on the user's server. You have direct access to the filesystem, shell, network, and connected services.
+Competent, efficient, and direct. You solve problems — you don't chat. Be proactive: if you see a better way, take the initiative.
+Concise and professional. Short sentences. Avoid hedging. Use tables, lists, or structured formats over prose. Match the user's energy.
+
+## Rules
+Privacy first — never leak sensitive info unnecessarily.
+Efficiency — minimize round-trips. Chain tools together to get answers in one go.
+Autonomy — when given a goal, figure out the best path without waiting to be told every step.
+If uncertain, say so and propose a path forward rather than guessing.
+Do not make up information — use tools to verify facts.
+
+## Tool Guidance
+Use tools proactively when they can help — don't just describe what you could do.
+For multi-step tasks, chain tools together. Use parallel execution for independent read operations.
+When a tool fails, explain what happened and try an alternative approach.
+Use search_web for current events and facts. Use query_data for weather, space, earthquakes, and live data.
+Use task to delegate independent research to a subagent — it runs in parallel with read-only tools.
+Each tool call must include ALL required parameters with valid values. Never send empty arguments.
+
+## Response Style
+Use markdown for code blocks with language tags.
+Use tables for structured data, bullet points for lists.
+Keep responses focused — answer the question, then stop.
+For errors: explain what went wrong and suggest a fix.
+For multi-step tasks: number the steps and execute them sequentially.`
 
 type Server struct {
 	Conversations *conversation.Service
@@ -100,8 +128,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/remote/servers/{id}/deploy", s.deployRemoteServer)
 	mux.HandleFunc("GET /api/remote/servers/{id}/health", s.healthRemoteServer)
 
-	// Image upload
+	// Image upload & serve
 	mux.HandleFunc("POST /api/upload", s.uploadImage)
+	mux.HandleFunc("GET /api/upload", func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Query().Get("path")
+		if p == "" {
+			http.Error(w, "missing path", 400)
+			return
+		}
+		http.ServeFile(w, r, p)
+	})
+
+	// Terminal
+	mux.HandleFunc("/ws/term", terminal.HandleTerm)
+
+	// File browser
+	mux.HandleFunc("GET /api/files", s.listFiles)
+	mux.HandleFunc("GET /api/files/read", s.readFileContent)
 
 	// Connectivity check
 	mux.HandleFunc("GET /api/check", s.checkConnectivity)
@@ -110,7 +153,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Web client
-	mux.Handle("/", http.FileServer(http.FS(s.WebFS)))
+	mux.Handle("/", noCacheHandler(http.FileServer(http.FS(s.WebFS))))
 
 	return mux
 }
@@ -325,6 +368,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(10 * 1024 * 1024) // 10MB for image uploads
 	defer conn.CloseNow()
 
 	client := &ws.Client{Conn: conn, Send: make(chan []byte, 64)}
@@ -349,6 +393,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Reader loop
+	chunks := map[string]string{} // id -> accumulated base64
+	chunkNames := map[string]string{}
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -364,12 +410,31 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			Language       string   `json:"language"`
 			Text           string   `json:"text"`
 			ImagePaths     []string `json:"imagePaths"`
+			ImageData      []struct {
+				Name string `json:"name"`
+				Data string `json:"data"`
+			} `json:"imageData"`
+			// file.chunk fields
+			ChunkID   string `json:"id"`
+			ChunkData string `json:"data"`
+			ChunkDone bool   `json:"done"`
+			FileName  string `json:"name"`
 		}
 		if json.Unmarshal(data, &msg) != nil {
 			continue
 		}
 		switch msg.Type {
 		case "chat.send":
+			// Save inline base64 images to disk, convert to paths
+			for _, img := range msg.ImageData {
+				if b, err := base64.StdEncoding.DecodeString(img.Data); err == nil {
+					dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "uploads")
+					os.MkdirAll(dir, 0755)
+					dst := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixMilli(), img.Name))
+					os.WriteFile(dst, b, 0644)
+					msg.ImagePaths = append(msg.ImagePaths, dst)
+				}
+			}
 			go s.handleChatSend(ctx, client, msg.ConversationID, msg.Content, msg.Mode, msg.ImagePaths)
 		case "chat.retry":
 			go s.handleRetry(ctx, client, msg.ConversationID, msg.AtIndex, msg.Mode)
@@ -392,6 +457,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if !enabled {
 				s.autoRunCount.Delete(msg.ConversationID)
 			}
+		case "file.chunk":
+			chunks[msg.ChunkID] += msg.ChunkData
+			if msg.FileName != "" {
+				chunkNames[msg.ChunkID] = msg.FileName
+			}
+			if msg.ChunkDone {
+				log.Printf("file.chunk: assembled %s (%d bytes b64)", chunkNames[msg.ChunkID], len(chunks[msg.ChunkID]))
+				b, err := base64.StdEncoding.DecodeString(chunks[msg.ChunkID])
+				if err == nil {
+					dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "uploads")
+					os.MkdirAll(dir, 0755)
+					dst := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixMilli(), chunkNames[msg.ChunkID]))
+					os.WriteFile(dst, b, 0644)
+					client.SendJSON(map[string]any{"type": "file.uploaded", "id": msg.ChunkID, "path": dst})
+				}
+				delete(chunks, msg.ChunkID)
+				delete(chunkNames, msg.ChunkID)
+			}
 		}
 	}
 }
@@ -409,7 +492,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	}
 
 	// Save user message
-	userMsg, err := s.Messages.Add(convID, "user", content)
+	userMsg, err := s.Messages.Add(convID, "user", content, imagePaths...)
 	if err != nil {
 		return
 	}
@@ -418,13 +501,14 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	// Build message history
 	msgs, _ := s.Messages.List(convID)
 	isFirstExchange := len(msgs) <= 1
+	log.Printf("chat.send: msgs=%d isFirstExchange=%v", len(msgs), isFirstExchange)
 	var chatMsgs []llm.ChatMessage
 
 	// System prompt from settings
 	allSettings, _ := s.Settings.All()
 	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
 	if sysPrompt == "" {
-		sysPrompt = "You are AIOPE, a helpful AI assistant."
+		sysPrompt = defaultSystemPrompt
 	}
 	// Apply per-model system prompt override
 	if p := s.Providers.GetActive(); p != nil {
@@ -454,12 +538,22 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: sysPrompt})
 	for _, m := range msgs {
 		if m.Role == "system" {
-			continue // summary already merged into system prompt
+			continue
 		}
-		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
+		cm := llm.ChatMessage{Role: m.Role, Content: m.Content}
+		if len(m.ImagePaths) > 0 {
+			parts := []any{map[string]any{"type": "text", "text": m.Content}}
+			for _, img := range m.ImagePaths {
+				if b64, err := encodeImageBase64(img); err == nil {
+					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + b64}})
+				}
+			}
+			cm.Content = parts
+		}
+		chatMsgs = append(chatMsgs, cm)
 	}
 
-	// Attach images to last user message as multimodal content
+	// Attach images to last user message from current send
 	if len(imagePaths) > 0 && len(chatMsgs) > 0 {
 		last := &chatMsgs[len(chatMsgs)-1]
 		if last.Role == "user" {
@@ -544,7 +638,8 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 	// Save assistant message
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		log.Printf("saving message: generatedImages=%v", toolCtx.GeneratedImages)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, toolCtx.GeneratedImages...)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -580,8 +675,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 func (s *Server) autoTitle(convID, userMsg string) {
 	prompt := []llm.ChatMessage{
-		{Role: "system", Content: "Generate a short title (max 6 words) for this conversation. Reply with only the title, no quotes."},
-		{Role: "user", Content: userMsg},
+		{Role: "user", Content: fmt.Sprintf("Generate a short title (max 6 words) for a conversation that starts with: %q. Reply with ONLY the title, no quotes.", userMsg[:min(len(userMsg), 200)])},
 	}
 	var title strings.Builder
 	s.mu.RLock()
@@ -1063,6 +1157,56 @@ func (s *Server) newToolContext() *llm.ToolContext {
 	return tc
 }
 
+func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("path")
+	if dir == "" {
+		dir = os.Getenv("HOME")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	type item struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"isDir"`
+		Size  int64  `json:"size"`
+	}
+	items := make([]item, 0, len(entries))
+	for _, e := range entries {
+		info, _ := e.Info()
+		sz := int64(0)
+		if info != nil {
+			sz = info.Size()
+		}
+		items = append(items, item{Name: e.Name(), IsDir: e.IsDir(), Size: sz})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"path": dir, "items": items})
+}
+
+func (s *Server) readFileContent(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		http.Error(w, "path required", 400)
+		return
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		http.Error(w, err.Error(), 404)
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "is a directory", 400)
+		return
+	}
+	if info.Size() > 2*1024*1024 {
+		http.Error(w, "file too large (>2MB)", 400)
+		return
+	}
+	http.ServeFile(w, r, p)
+}
+
 func (s *Server) checkConnectivity(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	p := s.Providers.GetActive()
@@ -1085,24 +1229,42 @@ func (s *Server) checkConnectivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
-	r.ParseMultipartForm(10 << 20) // 10MB
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	defer file.Close()
 	dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "uploads")
 	os.MkdirAll(dir, 0755)
-	name := fmt.Sprintf("%d_%s", time.Now().UnixMilli(), header.Filename)
-	dst := filepath.Join(dir, name)
-	out, err := os.Create(dst)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+
+	var imgBytes []byte
+	var fname string
+
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var req struct {
+			Name string `json:"name"`
+			Data string `json:"data"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		var err error
+		imgBytes, err = base64.StdEncoding.DecodeString(req.Data)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		fname = req.Name
+	} else {
+		r.ParseMultipartForm(10 << 20)
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		defer file.Close()
+		imgBytes, _ = io.ReadAll(file)
+		fname = header.Filename
 	}
-	io.Copy(out, file)
-	out.Close()
+
+	dst := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixMilli(), fname))
+	os.WriteFile(dst, imgBytes, 0644)
 	writeJSON(w, map[string]string{"path": dst})
 }
 
@@ -1205,7 +1367,7 @@ func ListenAndServe(bind string, port int, handler http.Handler) error {
 
 // --- Chat action handlers ---
 
-func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, error) {
+func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, []string, error) {
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1225,9 +1387,11 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 
 	tools := s.getEnabledTools(mode)
 
+	toolCtx := s.buildToolContext()
+
 	orch := &llm.Orchestrator{
 		Provider: prov, Model: model, Tools: tools, Ctx: ctx,
-		ToolCtx: s.buildToolContext(),
+		ToolCtx: toolCtx,
 		OnEvent: func(ev llm.StreamEvent) {
 			if ev.Delta != "" {
 				s.Hub.BroadcastJSON(map[string]any{"type": "stream.delta", "conversationId": convID, "messageId": assistantID, "delta": ev.Delta})
@@ -1246,7 +1410,8 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 			}
 		},
 	}
-	return orch.Run(chatMsgs)
+	content, err := orch.Run(chatMsgs)
+	return content, toolCtx.GeneratedImages, err
 }
 
 func (s *Server) buildToolContext() *llm.ToolContext {
@@ -1305,7 +1470,7 @@ func (s *Server) buildHistory(convID, mode string) []llm.ChatMessage {
 	allSettings, _ := s.Settings.All()
 	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
 	if sysPrompt == "" {
-		sysPrompt = "You are AIOPE, a helpful AI assistant."
+		sysPrompt = defaultSystemPrompt
 	}
 	chatMsgs := []llm.ChatMessage{{Role: "system", Content: sysPrompt}}
 	for _, m := range msgs {
@@ -1325,13 +1490,13 @@ func (s *Server) handleRetry(_ context.Context, client *ws.Client, convID string
 
 	chatMsgs := s.buildHistory(convID, mode)
 	assistantID := uuid.NewString()
-	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	fullContent, genImages, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
 	if err != nil {
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
 		return
 	}
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, genImages...)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -1356,13 +1521,13 @@ func (s *Server) handleEditResend(_ context.Context, client *ws.Client, convID, 
 
 	chatMsgs := s.buildHistory(convID, mode)
 	assistantID := uuid.NewString()
-	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	fullContent, genImages, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
 	if err != nil {
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
 		return
 	}
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, genImages...)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -1545,5 +1710,12 @@ func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language 
 		if ev.Done {
 			client.SendJSON(map[string]any{"type": "translation.done", "conversationId": convID, "messageId": messageID})
 		}
+	})
+}
+
+func noCacheHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		h.ServeHTTP(w, r)
 	})
 }

@@ -29,6 +29,8 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 
 	var fullContent strings.Builder
 	var fullReasoning strings.Builder
+	var lastToolKey string
+	var sameToolCount int
 
 	for round := 0; round < 140; round++ {
 		select {
@@ -95,10 +97,31 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		}
 		raw = append(raw, ChatMessage{Role: "assistant", ToolCalls: tcJSON})
 
+		// Detect tool call loops (same tool+args 3x in a row = bail)
+		toolKey := fmt.Sprintf("%s:%s", toolCalls[0].Name, toolCalls[0].RawArgs)
+		if toolKey == lastToolKey {
+			sameToolCount++
+			if sameToolCount >= 3 {
+				log.Printf("orchestrator: breaking loop on %s after %d repeats", toolCalls[0].Name, sameToolCount)
+				o.OnEvent(StreamEvent{Done: true, FinishReason: "tool_loop"})
+				return fullContent.String(), nil
+			}
+		} else {
+			lastToolKey = toolKey
+			sameToolCount = 1
+		}
+
 		// Execute tools (parallel if all safe, else sequential)
 		results := executeCalls(toolCalls, o.ToolCtx)
 
 		// Emit results to client
+		for _, r := range results {
+			if r.IsErr || len(r.Result) < 50 {
+				log.Printf("tool result: %s err=%v content=%q", r.Name, r.IsErr, r.Result)
+			} else {
+				log.Printf("tool result: %s err=%v len=%d", r.Name, r.IsErr, len(r.Result))
+			}
+		}
 		o.OnEvent(StreamEvent{ToolResults: results})
 
 		// Append tool results to messages
@@ -114,7 +137,12 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 			})
 		}
 
-		log.Printf("orchestrator: round %d, %d tool calls, continuing", round+1, len(toolCalls))
+		names := make([]string, len(toolCalls))
+		for i, tc := range toolCalls {
+			names[i] = tc.Name
+			log.Printf("tool call: %s args=%s", tc.Name, tc.RawArgs)
+		}
+		log.Printf("orchestrator: round %d, tools=%v, continuing", round+1, names)
 	}
 
 	o.OnEvent(StreamEvent{Done: true, FinishReason: "max_rounds"})
@@ -143,6 +171,9 @@ func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
 					r.Result = "Error: " + err.Error()
 					r.IsErr = true
 				}
+				if r.Result == "" {
+					r.Result = "(empty)"
+				}
 				results[i] = r
 			}(i, c)
 		}
@@ -157,6 +188,9 @@ func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
 		if err != nil {
 			r.Result = "Error: " + err.Error()
 			r.IsErr = true
+		}
+		if r.Result == "" {
+			r.Result = "(empty)"
 		}
 		results[i] = r
 	}

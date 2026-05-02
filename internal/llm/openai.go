@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -100,6 +101,7 @@ func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, o
 	}
 
 	data, _ := json.Marshal(body)
+	log.Printf("LLM request: model=%s messages=%d len=%d", model, len(messages), len(data))
 	endpoint := "/chat/completions"
 	if o.EndpointOverride != "" {
 		endpoint = o.EndpointOverride
@@ -118,6 +120,9 @@ func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, o
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == 400 {
+			log.Printf("LLM 400 request body: %s", string(data))
+		}
 		return fmt.Errorf("LLM API %d: %s", resp.StatusCode, string(b))
 	}
 
@@ -249,7 +254,8 @@ func buildToolCalls(acc map[int]*struct{ id, name, args string }) []ToolCallInfo
 		if args == nil {
 			args = map[string]any{}
 		}
-		calls = append(calls, ToolCallInfo{ID: a.id, Name: a.name, Arguments: args, RawArgs: a.args})
+		clean, _ := json.Marshal(args)
+		calls = append(calls, ToolCallInfo{ID: a.id, Name: a.name, Arguments: args, RawArgs: string(clean)})
 	}
 	return calls
 }
