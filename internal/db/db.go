@@ -17,6 +17,7 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
 	db.Exec("PRAGMA journal_mode=WAL")
 	db.Exec("PRAGMA foreign_keys=ON")
 	db.Exec("PRAGMA busy_timeout=5000")

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -272,13 +273,18 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 	}
 	switch name {
 	case "run_sh":
-		cmd := exec.Command("bash", "-c", str("command"))
+		cmdCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(cmdCtx, "bash", "-c", str("command"))
 		cmd.Env = os.Environ()
 		out, err := cmd.CombinedOutput()
 		result := string(out)
 		lim := ctx.shellLimit()
 		if len(result) > lim {
 			result = result[:lim] + "\n...(truncated)"
+		}
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			return result + "\n[timeout after 120s]", nil
 		}
 		if err != nil && result == "" {
 			return "", fmt.Errorf("command failed: %v", err)
@@ -614,7 +620,7 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 
 	prov := &OpenAI{APIKey: ctx.GatewayKey, APIBase: gwURL}
 	var result strings.Builder
-	err = prov.Stream(msgs, model, nil, func(ev StreamEvent) {
+	err = prov.Stream(context.Background(), msgs, model, nil, func(ev StreamEvent) {
 		if ev.Delta != "" {
 			result.WriteString(ev.Delta)
 		}

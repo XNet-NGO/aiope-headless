@@ -15,9 +15,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/XNet-NGO/AIOPE-Headless/internal/conversation"
@@ -702,7 +704,7 @@ func (s *Server) autoTitle(convID, userMsg string) {
 		model = "gpt-4o"
 	}
 	log.Printf("autoTitle: conv=%s model=%s", convID, model)
-	err := prov.Stream(prompt, model, nil, func(ev llm.StreamEvent) {
+	err := prov.Stream(context.Background(), prompt, model, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			title.WriteString(ev.Delta)
 		}
@@ -723,6 +725,14 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
 	ps, _ := s.Providers.List()
 	if ps == nil {
 		ps = []provider.Profile{}
+	}
+	// Redact API keys in response
+	for i := range ps {
+		if len(ps[i].APIKey) > 8 {
+			ps[i].APIKey = ps[i].APIKey[:4] + "****" + ps[i].APIKey[len(ps[i].APIKey)-4:]
+		} else if ps[i].APIKey != "" {
+			ps[i].APIKey = "****"
+		}
 	}
 	writeJSON(w, ps)
 }
@@ -1361,8 +1371,23 @@ func ListenAndServe(bind string, port int, handler http.Handler) error {
 		host = "0.0.0.0"
 	}
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("AIOPE-Headless running on http://%s", addr)
-	return http.ListenAndServe(addr, handler)
+	srv := &http.Server{Addr: addr, Handler: handler}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("AIOPE-Headless running on http://%s", addr)
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	<-done
+	log.Println("Shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(ctx)
 }
 
 // --- Chat action handlers ---
@@ -1608,7 +1633,7 @@ func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
 
 	var summary strings.Builder
 	log.Printf("compact: using model %s for %d messages", summaryModel, atIndex)
-	err := prov.Stream(prompt, summaryModel, nil, func(ev llm.StreamEvent) {
+	err := prov.Stream(context.Background(), prompt, summaryModel, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			summary.WriteString(ev.Delta)
 		}
@@ -1694,16 +1719,17 @@ func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language 
 
 	s.mu.RLock()
 	prov := s.Provider
+	transModelFallback := s.Model
 	s.mu.RUnlock()
 	if transModel == "" {
-		transModel = s.Model
+		transModel = transModelFallback
 	}
 
 	prompt := []llm.ChatMessage{
 		{Role: "user", Content: "Translate the following text to " + language + ". Output ONLY the translated text, no explanations, no original text, no labels:\n\n" + content},
 	}
 
-	prov.Stream(prompt, transModel, nil, func(ev llm.StreamEvent) {
+	prov.Stream(context.Background(), prompt, transModel, nil, func(ev llm.StreamEvent) {
 		if ev.Delta != "" {
 			client.SendJSON(map[string]any{"type": "translation.delta", "conversationId": convID, "messageId": messageID, "delta": ev.Delta})
 		}

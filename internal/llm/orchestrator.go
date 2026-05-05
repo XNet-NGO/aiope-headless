@@ -46,7 +46,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		var toolCalls []ToolCallInfo
 		var streamErr error
 
-		err := o.Provider.Stream(raw, o.Model, o.Tools, func(ev StreamEvent) {
+		err := o.Provider.Stream(ctx, raw, o.Model, o.Tools, func(ev StreamEvent) {
 			if ev.Delta != "" {
 				roundContent.WriteString(ev.Delta)
 				fullContent.WriteString(ev.Delta)

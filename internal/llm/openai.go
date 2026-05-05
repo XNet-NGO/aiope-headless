@@ -3,6 +3,7 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,7 +50,7 @@ type ToolDef struct {
 }
 
 type Provider interface {
-	Stream(messages []ChatMessage, model string, tools []ToolDef, onEvent func(StreamEvent)) error
+	Stream(ctx context.Context, messages []ChatMessage, model string, tools []ToolDef, onEvent func(StreamEvent)) error
 }
 
 type OpenAI struct {
@@ -62,7 +63,7 @@ type OpenAI struct {
 	ReasoningEffort *string
 }
 
-func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, onEvent func(StreamEvent)) error {
+func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model string, tools []ToolDef, onEvent func(StreamEvent)) error {
 	base := o.APIBase
 	if base == "" {
 		base = "https://api.openai.com/v1"
@@ -106,7 +107,7 @@ func (o *OpenAI) Stream(messages []ChatMessage, model string, tools []ToolDef, o
 	if o.EndpointOverride != "" {
 		endpoint = o.EndpointOverride
 	}
-	req, _ := http.NewRequest("POST", strings.TrimRight(base, "/")+endpoint, bytes.NewReader(data))
+	req, _ := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(base, "/")+endpoint, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	if o.APIKey != "" {
