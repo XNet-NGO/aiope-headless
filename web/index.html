@@ -357,6 +357,9 @@ function renderSidebar(){
 function md(s){
   if(!s)return'';
   s=s.replace(/<\/?(?:thought|think)>/g,'');
+  // Strip malformed model output tags (DSML, function_calls, antml, etc.)
+  s=s.replace(/<\/?(?:DSML|antml)[^>]*>/g,'');
+  s=s.replace(/<(?:DSML｜|antml:)[^>]*>/g,'');
   // Fix image URLs before markdown parsing — model may output fake hostnames or raw paths
   s=s.replace(/!\[([^\]]*)\]\(([^)]*\.aiope-headless\/generated\/[^)]+)\)/g,(m,alt,url)=>{
     const fname=url.match(/img_\d+\.png/);
@@ -401,7 +404,6 @@ function renderMessages(){
     html+=`<span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
   }
   el.innerHTML=html;
-  el.scrollTop=el.scrollHeight;
   // Patch external images: swap to local copy if available, hide if broken
   el.querySelectorAll('.msg').forEach((msgEl,i)=>{
     const m=S.msgs[i];if(!m)return;
@@ -456,7 +458,6 @@ function renderStreamDelta(){
       }
     }
     el.innerHTML=md(S.streamContent);
-    const p=el.closest('.messages');if(p)p.scrollTop=p.scrollHeight;
   });
 }
 
@@ -469,7 +470,6 @@ function updateSendBtn(){
 function appendError(err){
   const el=document.getElementById('messages');
   el.innerHTML+=`<div class="msg msg-assistant" style="color:var(--error)">Error: ${esc(err)}</div>`;
-  el.scrollTop=el.scrollHeight;
 }
 
 async function newChat(){

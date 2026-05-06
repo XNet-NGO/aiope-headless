@@ -112,9 +112,11 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		}
 
 		// Execute tools (parallel if all safe, else sequential)
-		results := executeCalls(toolCalls, o.ToolCtx)
+		results := executeCalls(toolCalls, o.ToolCtx, func(r ToolResultInfo) {
+			o.OnEvent(StreamEvent{ToolResults: []ToolResultInfo{r}})
+		})
 
-		// Emit results to client
+		// Log results
 		for _, r := range results {
 			if r.IsErr || len(r.Result) < 50 {
 				log.Printf("tool result: %s err=%v content=%q", r.Name, r.IsErr, r.Result)
@@ -122,7 +124,6 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 				log.Printf("tool result: %s err=%v len=%d", r.Name, r.IsErr, len(r.Result))
 			}
 		}
-		o.OnEvent(StreamEvent{ToolResults: results})
 
 		// Append tool results to messages
 		for _, r := range results {
@@ -149,7 +150,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 	return fullContent.String(), nil
 }
 
-func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
+func executeCalls(calls []ToolCallInfo, ctx *ToolContext, onResult func(ToolResultInfo)) []ToolResultInfo {
 	allSafe := true
 	for _, c := range calls {
 		if !ParallelSafe[c.Name] {
@@ -175,6 +176,9 @@ func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
 					r.Result = "(empty)"
 				}
 				results[i] = r
+				if onResult != nil {
+					onResult(r)
+				}
 			}(i, c)
 		}
 		wg.Wait()
@@ -193,6 +197,9 @@ func executeCalls(calls []ToolCallInfo, ctx *ToolContext) []ToolResultInfo {
 			r.Result = "(empty)"
 		}
 		results[i] = r
+		if onResult != nil {
+			onResult(r)
+		}
 	}
 	return results
 }
