@@ -358,8 +358,8 @@ function md(s){
   if(!s)return'';
   s=s.replace(/<\/?(?:thought|think)>/g,'');
   // Strip malformed model output tags (DSML, function_calls, antml, etc.)
+  s=s.replace(/<[｜|]?DSML[^\n]*/g,'');
   s=s.replace(/<\/?(?:DSML|antml)[^>]*>/g,'');
-  s=s.replace(/<(?:DSML｜|antml:)[^>]*>/g,'');
   // Fix image URLs before markdown parsing — model may output fake hostnames or raw paths
   s=s.replace(/!\[([^\]]*)\]\(([^)]*\.aiope-headless\/generated\/[^)]+)\)/g,(m,alt,url)=>{
     const fname=url.match(/img_\d+\.png/);

@@ -131,6 +131,7 @@ func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model strin
 	toolAcc := map[int]*struct{ id, name, args string }{}
 	inThinkTag := false
 	thinkTagName := "think"
+	inDSML := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
@@ -237,6 +238,24 @@ func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model strin
 		}
 
 		if content != "" || reasoning != "" {
+			// Suppress DSML blocks (malformed tool call attempts from some models)
+			// Format: <｜DSML｜function_calls...  or <DSML｜...
+			if !inDSML && (strings.Contains(content, "<\xef\xbd\x9cDSML") || strings.Contains(content, "<DSML")) {
+				idx := strings.Index(content, "<\xef\xbd\x9cDSML")
+				if idx < 0 {
+					idx = strings.Index(content, "<DSML")
+				}
+				inDSML = true
+				content = content[:idx]
+			}
+			if inDSML {
+				if strings.Contains(content, "</") || strings.Contains(content, "\xef\xbd\x9c>") {
+					content = ""
+					inDSML = false
+				} else {
+					content = ""
+				}
+			}
 			ev := StreamEvent{Delta: content}
 			if reasoning != "" {
 				ev.Reasoning = reasoning

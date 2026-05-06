@@ -244,7 +244,7 @@ func (ctx *ToolContext) fileReadLim() int {
 
 // Task model resolution — different models for different tasks
 var TaskModelDefaults = map[string]string{
-	"title":             "google-ai-studio/models-gemma-3-1b-it",
+	"title":             "google-ai-studio/models-gemma-3-4b-it",
 	"summary":           "google-ai-studio/models-gemma-3-27b-it",
 	"image_gen":         "pollinations-pollen/klein",
 	"image_recognition": "google-ai-studio/models-gemma-3-27b-it",
