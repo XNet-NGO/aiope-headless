@@ -74,6 +74,7 @@ type Server struct {
 	MCP           *mcp.Manager
 	Remote        *remote.Service
 	Password      string
+	BasePath      string
 	sessionToken  string
 	mu            sync.RWMutex
 	cancels       sync.Map // conversationId -> context.CancelFunc
@@ -185,9 +186,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "aiope_session",
 		Value:    s.sessionToken,
-		Path:     "/",
+		Path:     s.BasePath + "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   86400 * 30,
 	})
 	w.WriteHeader(200)
@@ -207,7 +208,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
 				http.Error(w, `{"error":"unauthorized"}`, 401)
 			} else {
-				http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
+				http.Redirect(w, r, s.BasePath+"/login", http.StatusTemporaryRedirect)
 			}
 			return
 		}
@@ -842,7 +843,7 @@ func (s *Server) updateProvider(w http.ResponseWriter, r *http.Request) {
 	if patch.Label != "" {
 		existing.Label = patch.Label
 	}
-	if patch.APIKey != "" {
+	if patch.APIKey != "" && !strings.Contains(patch.APIKey, "****") {
 		existing.APIKey = patch.APIKey
 	}
 	if patch.APIBase != "" {

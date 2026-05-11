@@ -271,17 +271,18 @@ marked.setOptions({gfm:true,breaks:true,highlight:(code,lang)=>{
 const S={convs:[],active:null,msgs:[],streaming:false,streamId:null,streamContent:'',streamReasoning:'',streamTools:[],translations:{},mode:'chat'};
 let ws;
 
+const BASE=(()=>{const s=document.currentScript&&document.currentScript.src?new URL(document.currentScript.src).pathname:location.pathname;const m=s.match(/^(\/[^/]+)(?:\/|$)/);return m&&m[1]!=='/api'?m[1]:''})();
 const api={
-  async get(u){const r=await fetch(u);if(r.status===401){location.href='/login';return{}}return r.json()},
-  async post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href='/login'}return r},
-  async put(u,b){const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href='/login'}return r},
-  async del(u){const r=await fetch(u,{method:'DELETE'});if(r.status===401){location.href='/login'}return r},
-  async patch(u,b){return fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
+  async get(u){const r=await fetch(BASE+u);if(r.status===401){location.href=BASE+'/login';return{}}return r.json()},
+  async post(u,b){const r=await fetch(BASE+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href=BASE+'/login'}return r},
+  async put(u,b){const r=await fetch(BASE+u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href=BASE+'/login'}return r},
+  async del(u){const r=await fetch(BASE+u,{method:'DELETE'});if(r.status===401){location.href=BASE+'/login'}return r},
+  async patch(u,b){return fetch(BASE+u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 };
 
 function connectWS(){
   const proto=location.protocol==='https:'?'wss:':'ws:';
-  ws=new WebSocket(proto+'//'+location.host+'/ws');
+  ws=new WebSocket(proto+'//'+location.host+BASE+'/ws');
   ws.onmessage=e=>{
     const m=JSON.parse(e.data);
     switch(m.type){
@@ -363,7 +364,7 @@ function md(s){
   // Fix image URLs before markdown parsing — model may output fake hostnames or raw paths
   s=s.replace(/!\[([^\]]*)\]\(([^)]*\.aiope-headless\/generated\/[^)]+)\)/g,(m,alt,url)=>{
     const fname=url.match(/img_\d+\.png/);
-    if(fname) return `![${alt}](/api/upload?path=${encodeURIComponent('/home/xnet-admin/.aiope-headless/generated/'+fname[0])})`;
+    if(fname) return `![${alt}](${BASE}/api/upload?path=${encodeURIComponent('/home/xnet-admin/.aiope-headless/generated/'+fname[0])})`;
     return m;
   });
   let html=marked.parse(s);
@@ -378,14 +379,14 @@ function renderMessages(){
     let body=m.role==='assistant'?md(m.content):esc(m.content);
     let imgs='';
     if(m.imagePaths&&m.imagePaths.length&&m.role==='user'){
-      imgs=m.imagePaths.map(p=>`<img src="/api/upload?path=${encodeURIComponent(p)}" style="max-width:200px;border-radius:8px;margin:4px 4px 4px 0;cursor:pointer" onclick="window.open(this.src)">`).join('')+'<br>';
+      imgs=m.imagePaths.map(p=>`<img src="${BASE}/api/upload?path=${encodeURIComponent(p)}" style="max-width:200px;border-radius:8px;margin:4px 4px 4px 0;cursor:pointer" onclick="window.open(this.src)">`).join('')+'<br>';
     }
     // If assistant has imagePaths but none rendered inline, append them
     if(m.imagePaths&&m.imagePaths.length&&m.role==='assistant'){
       const rendered=body.match(/<img /g)||[];
       if(rendered.length<m.imagePaths.length){
         const missing=m.imagePaths.slice(rendered.length);
-        body+=missing.map(p=>`<br><img src="/api/upload?path=${encodeURIComponent(p)}" style="max-width:100%;max-height:400px;border-radius:8px;margin:4px 0;cursor:pointer" onclick="window.open(this.src)">`).join('');
+        body+=missing.map(p=>`<br><img src="${BASE}/api/upload?path=${encodeURIComponent(p)}" style="max-width:100%;max-height:400px;border-radius:8px;margin:4px 0;cursor:pointer" onclick="window.open(this.src)">`).join('');
       }
     }
     let trans=S.translations[m.id]?`<div class="translation">${md(S.translations[m.id])}</div>`:'';
@@ -411,7 +412,7 @@ function renderMessages(){
     let idx=0;
     msgEl.querySelectorAll('img[src^="http"]').forEach(img=>{
       if(idx<locals.length){
-        const local='/api/upload?path='+encodeURIComponent(locals[idx]);
+        const local=BASE+'/api/upload?path='+encodeURIComponent(locals[idx]);
         img.onerror=function(){this.onerror=null;this.src=local};
         idx++;
       }else{
@@ -541,7 +542,7 @@ function renderImagePreview(){
   const el=document.getElementById('imagePreview');
   if(!pendingImages.length){el.style.display='none';return}
   el.style.display='flex';
-  el.innerHTML=pendingImages.map((p,i)=>`<div style="position:relative;width:48px;height:48px;border-radius:6px;overflow:hidden;border:1px solid var(--outline);background:var(--surface-variant)"><img src="${p.url||'/api/upload?path='+encodeURIComponent(p)}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'"><button onclick="pendingImages.splice(${i},1);renderImagePreview()" style="position:absolute;top:-2px;right:-2px;background:var(--error);color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;line-height:16px;text-align:center">x</button></div>`).join('');
+  el.innerHTML=pendingImages.map((p,i)=>`<div style="position:relative;width:48px;height:48px;border-radius:6px;overflow:hidden;border:1px solid var(--outline);background:var(--surface-variant)"><img src="${p.url||BASE+'/api/upload?path='+encodeURIComponent(p)}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'"><button onclick="pendingImages.splice(${i},1);renderImagePreview()" style="position:absolute;top:-2px;right:-2px;background:var(--error);color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;line-height:16px;text-align:center">x</button></div>`).join('');
 }
 function send(){
   if(S.streaming){ws.send(JSON.stringify({type:'chat.cancel',conversationId:S.active}));return}
@@ -864,7 +865,6 @@ const taskDefs=[
   {id:'translation',label:'Translation',desc:'Text translation'},
   {id:'image_recognition',label:'Image Recognition',desc:'Analyze images'},
   {id:'subagent',label:'Subagent (Task Tool)',desc:'Background research agents'},
-  {id:'image_gen',label:'Image Generation',desc:'Generate images from text'},
 ];
 
 let cachedModels=null;
@@ -1066,13 +1066,9 @@ const builtinTools=[
   {id:'write_file',label:'Write File'},
   {id:'list_directory',label:'List Directory'},
   {id:'fetch_url',label:'Fetch URL'},
-  {id:'search_web',label:'Web Search'},
-  {id:'search_images',label:'Image Search'},
-  {id:'query_data',label:'Query Data'},
   {id:'memory_store',label:'Memory Store'},
   {id:'memory_recall',label:'Memory Recall'},
   {id:'memory_forget',label:'Memory Forget'},
-  {id:'image_generate',label:'Image Generate'},
   {id:'task',label:'Subagent Task'},
   {id:'analyze_image',label:'Analyze Image'},
   {id:'ssh_start',label:'SSH Start'},
@@ -1235,12 +1231,12 @@ async function initTerminal(){
   termObj.open(panel);
   try{termFit.fit()}catch(e){}
   // Reuse existing session or create new
-  const listResp=await fetch('/ws/term?action=list');
+  const listResp=await fetch(BASE+'/ws/term?action=list');
   const ids=await listResp.json();
   if(ids.length>0){
     termSessionId=ids[0];
   }else{
-    const r=await fetch('/ws/term?action=new');
+    const r=await fetch(BASE+'/ws/term?action=new');
     const d=await r.json();
     termSessionId=d.id;
   }
@@ -1264,7 +1260,7 @@ function connectTermWS(){
   if(termWS){termWS.onclose=null;termWS.close()}
   clearInterval(termHBInterval);
   const proto=location.protocol==='https:'?'wss:':'ws:';
-  termWS=new WebSocket(`${proto}//${location.host}/ws/term?id=${termSessionId}`);
+  termWS=new WebSocket(`${proto}//${location.host}${BASE}/ws/term?id=${termSessionId}`);
   termWS.binaryType='arraybuffer';
   termWS.onopen=()=>{
     termRetries=0;
@@ -1325,7 +1321,7 @@ function toggleFiles(){
 async function browseDir(path){
   document.getElementById('fpPreview').style.display='none';
   document.getElementById('fpList').style.display='block';
-  const r=await fetch('/api/files?path='+encodeURIComponent(path));
+  const r=await fetch(BASE+'/api/files?path='+encodeURIComponent(path));
   const d=await r.json();
   fpCurrentPath=d.path;
   document.getElementById('fpPath').textContent=d.path;
@@ -1349,7 +1345,7 @@ async function previewFile(path){
     return;
   }
   try{
-    const r=await fetch('/api/files/read?path='+encodeURIComponent(path));
+    const r=await fetch(BASE+'/api/files/read?path='+encodeURIComponent(path));
     if(!r.ok){pre.textContent='Error: '+await r.text();return}
     const txt=await r.text();
     pre.textContent=txt.length>100000?txt.slice(0,100000)+'\n...(truncated)':txt;

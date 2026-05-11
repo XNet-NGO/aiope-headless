@@ -12,6 +12,7 @@ type Config struct {
 	DBPath   string `json:"db_path"`
 	SyncURL  string `json:"sync_url"`
 	Password string `json:"password"`
+	BasePath string `json:"base_path"`
 }
 
 func Load() *Config {
@@ -40,6 +41,9 @@ func Load() *Config {
 	}
 	if v := os.Getenv("AIOPE_PASSWORD"); v != "" {
 		c.Password = v
+	}
+	if v := os.Getenv("AIOPE_BASE_PATH"); v != "" {
+		c.BasePath = v
 	}
 	return c
 }

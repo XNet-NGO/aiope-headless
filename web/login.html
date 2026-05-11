@@ -25,8 +25,9 @@ button:hover{background:#5a52d5}
 <script>
 async function login(e){
   e.preventDefault();
-  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});
-  if(r.ok){window.location.href='/'}
+  const base=window.location.pathname.replace(/\/login\/?$/,'');
+  const r=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});
+  if(r.ok){window.location.href=base+'/'}
   else{document.getElementById('err').style.display='block';document.getElementById('pw').value=''}
   return false;
 }
