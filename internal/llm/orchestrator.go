@@ -278,9 +278,9 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 	if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.Content == nil {
 		return json.Marshal(struct {
 			Role      string `json:"role"`
-			Content   any    `json:"content"`
+			Content   string `json:"content"`
 			ToolCalls []any  `json:"tool_calls"`
-		}{m.Role, nil, m.ToolCalls})
+		}{m.Role, "", m.ToolCalls})
 	}
 	return json.Marshal(struct{ Alias }{Alias(m)})
 }

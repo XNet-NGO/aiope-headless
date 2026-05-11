@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIOPE — Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui;background:#1a1a2e;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login{background:#16213e;padding:2rem;border-radius:12px;width:320px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+h1{font-size:1.4rem;margin-bottom:1.5rem;text-align:center}
+input{width:100%;padding:.75rem;border:1px solid #333;border-radius:8px;background:#0f3460;color:#e0e0e0;font-size:1rem;margin-bottom:1rem}
+input:focus{outline:none;border-color:#6c63ff}
+button{width:100%;padding:.75rem;border:none;border-radius:8px;background:#6c63ff;color:#fff;font-size:1rem;cursor:pointer}
+button:hover{background:#5a52d5}
+.err{color:#ff6b6b;font-size:.85rem;margin-bottom:.5rem;display:none}
+</style>
+</head><body>
+<div class="login">
+<h1>🔒 AIOPE</h1>
+<div class="err" id="err">Invalid password</div>
+<form onsubmit="return login(event)">
+<input type="password" id="pw" placeholder="Password" autofocus>
+<button type="submit">Sign In</button>
+</form>
+</div>
+<script>
+async function login(e){
+  e.preventDefault();
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value})});
+  if(r.ok){window.location.href='/'}
+  else{document.getElementById('err').style.display='block';document.getElementById('pw').value=''}
+  return false;
+}
+</script>
+</body></html>

@@ -14,6 +14,7 @@ docker build -t aiope-headless .
 docker run -d --name aiope --restart unless-stopped \
   --network host \
   -v ~/.aiope-headless:/data \
+  -v ~/.aiope-headless/.ssh:/home/aiope/.ssh:ro \
   -e AIOPE_BIND=10.121.21.25 \
   aiope-headless:latest
 ```
@@ -33,7 +34,8 @@ Container: aiope (debian:bookworm-slim)
            ├── aiope2-chat.db    SQLite database
            ├── uploads/          Attached images
            ├── generated/        AI-generated images
-           └── workspace/        Agent scratch area
+           ├── workspace/        Agent scratch area
+           └── .ssh/             SSH keys (mounted to /home/aiope/.ssh:ro)
 ```
 
 The agent's shell commands run inside the container sandbox. Data persists on the bind mount across container rebuilds.

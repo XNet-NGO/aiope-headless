@@ -272,10 +272,10 @@ const S={convs:[],active:null,msgs:[],streaming:false,streamId:null,streamConten
 let ws;
 
 const api={
-  async get(u){const r=await fetch(u);return r.json()},
-  async post(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})},
-  async put(u,b){return fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})},
-  async del(u){return fetch(u,{method:'DELETE'})},
+  async get(u){const r=await fetch(u);if(r.status===401){location.href='/login';return{}}return r.json()},
+  async post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href='/login'}return r},
+  async put(u,b){const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href='/login'}return r},
+  async del(u){const r=await fetch(u,{method:'DELETE'});if(r.status===401){location.href='/login'}return r},
   async patch(u,b){return fetch(u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 };
 

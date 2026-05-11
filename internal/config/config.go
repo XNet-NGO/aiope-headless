@@ -7,10 +7,11 @@ import (
 )
 
 type Config struct {
-	Port    int    `json:"port"`
-	Bind    string `json:"bind"`
-	DBPath  string `json:"db_path"`
-	SyncURL string `json:"sync_url"`
+	Port     int    `json:"port"`
+	Bind     string `json:"bind"`
+	DBPath   string `json:"db_path"`
+	SyncURL  string `json:"sync_url"`
+	Password string `json:"password"`
 }
 
 func Load() *Config {
@@ -36,6 +37,9 @@ func Load() *Config {
 	}
 	if v := os.Getenv("AIOPE_SYNC_URL"); v != "" {
 		c.SyncURL = v
+	}
+	if v := os.Getenv("AIOPE_PASSWORD"); v != "" {
+		c.Password = v
 	}
 	return c
 }

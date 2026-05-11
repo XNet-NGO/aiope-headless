@@ -64,6 +64,7 @@ func main() {
 		DB:            database,
 		MCP:           mcp.NewManager(database),
 		Remote:        remoteSvc,
+		Password:      cfg.Password,
 	}
 
 	log.Fatal(server.ListenAndServe(cfg.Bind, cfg.Port, srv.Handler()))

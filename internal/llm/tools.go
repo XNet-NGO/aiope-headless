@@ -20,8 +20,8 @@ import (
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
 	"search_web": true, "search_images": true, "query_data": true,
-	"memory_recall": true, "ssh_exec": true, "analyze_image": true,
-	"task": true,
+	"memory_recall": true, "memory_store": true, "ssh_exec": true,
+	"analyze_image": true, "task": true,
 }
 
 var BuiltinTools = []ToolDef{

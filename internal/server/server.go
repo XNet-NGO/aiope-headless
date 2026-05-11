@@ -74,6 +74,8 @@ type Server struct {
 	DB            *sql.DB
 	MCP           *mcp.Manager
 	Remote        *remote.Service
+	Password      string
+	sessionToken  string
 	mu            sync.RWMutex
 	cancels       sync.Map // conversationId -> context.CancelFunc
 	autoRun       sync.Map // conversationId -> bool
@@ -155,9 +157,63 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws", s.handleWS)
 
 	// Web client
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
+		f, _ := s.WebFS.Open("login.html")
+		if f != nil {
+			defer f.Close()
+			w.Header().Set("Content-Type", "text/html")
+			io.Copy(w, f)
+		}
+	})
 	mux.Handle("/", noCacheHandler(http.FileServer(http.FS(s.WebFS))))
 
+	// Auth: if password set, wrap with session auth
+	if s.Password != "" {
+		s.sessionToken = uuid.NewString()
+		mux.HandleFunc("POST /api/login", s.handleLogin)
+		return s.authMiddleware(mux)
+	}
 	return mux
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Password string }
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.Password != s.Password {
+		http.Error(w, `{"error":"invalid password"}`, 401)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "aiope_session",
+		Value:    s.sessionToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400 * 30,
+	})
+	w.WriteHeader(200)
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow login endpoint and static login page
+		if r.URL.Path == "/api/login" || r.URL.Path == "/login" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := r.Cookie("aiope_session")
+		if err != nil || cookie.Value != s.sessionToken {
+			// For API/WS requests return 401, for browser redirect to login
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws") {
+				http.Error(w, `{"error":"unauthorized"}`, 401)
+			} else {
+				http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
+			}
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) listConversations(w http.ResponseWriter, r *http.Request) {
@@ -538,19 +594,31 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	}
 
 	chatMsgs = append(chatMsgs, llm.ChatMessage{Role: "system", Content: sysPrompt})
+
+	// Check if active model supports vision (must be explicitly enabled)
+	supportsVision := false
+	if p := s.Providers.GetActive(); p != nil {
+		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok && mc.VisionOverride != nil && *mc.VisionOverride {
+			supportsVision = true
+		}
+	}
+
 	for _, m := range msgs {
 		if m.Role == "system" {
 			continue
 		}
 		cm := llm.ChatMessage{Role: m.Role, Content: m.Content}
 		if len(m.ImagePaths) > 0 {
-			parts := []any{map[string]any{"type": "text", "text": m.Content}}
-			for _, img := range m.ImagePaths {
-				if b64, err := encodeImageBase64(img); err == nil {
-					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + b64}})
+			if supportsVision {
+				parts := []any{map[string]any{"type": "text", "text": m.Content}}
+				for _, img := range m.ImagePaths {
+					if b64, err := encodeImageBase64(img); err == nil {
+						parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + b64}})
+					}
 				}
+				cm.Content = parts
 			}
-			cm.Content = parts
+			// Non-vision: historical images already described at send time, skip
 		}
 		chatMsgs = append(chatMsgs, cm)
 	}
@@ -559,19 +627,34 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	if len(imagePaths) > 0 && len(chatMsgs) > 0 {
 		last := &chatMsgs[len(chatMsgs)-1]
 		if last.Role == "user" {
-			parts := []any{map[string]any{"type": "text", "text": last.Content}}
-			for _, img := range imagePaths {
-				b64, err := encodeImageBase64(img)
-				if err != nil {
-					log.Printf("image encode error: %v", err)
-					continue
+			if supportsVision {
+				parts := []any{map[string]any{"type": "text", "text": last.Content}}
+				for _, img := range imagePaths {
+					b64, err := encodeImageBase64(img)
+					if err != nil {
+						log.Printf("image encode error: %v", err)
+						continue
+					}
+					parts = append(parts, map[string]any{
+						"type":      "image_url",
+						"image_url": map[string]any{"url": "data:image/jpeg;base64," + b64},
+					})
 				}
-				parts = append(parts, map[string]any{
-					"type":      "image_url",
-					"image_url": map[string]any{"url": "data:image/jpeg;base64," + b64},
-				})
+				last.Content = parts
+			} else {
+				// Fallback: use analyze_image task model to describe images as text
+				toolCtx := s.buildToolContext()
+				var descriptions []string
+				for _, img := range imagePaths {
+					desc, err := llm.ExecuteTool("analyze_image", map[string]any{"url": img, "question": "Describe this image in detail."}, toolCtx)
+					if err == nil && desc != "" {
+						descriptions = append(descriptions, desc)
+					}
+				}
+				if len(descriptions) > 0 {
+					last.Content = fmt.Sprintf("%s\n\n[Attached image descriptions]\n%s", last.Content, strings.Join(descriptions, "\n---\n"))
+				}
 			}
-			last.Content = parts
 		}
 	}
 
