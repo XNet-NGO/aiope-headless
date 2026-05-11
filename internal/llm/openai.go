@@ -167,8 +167,19 @@ func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model strin
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
 		}
-		if json.Unmarshal([]byte(d), &chunk) != nil || len(chunk.Choices) == 0 {
+		if json.Unmarshal([]byte(d), &chunk) != nil {
+			continue
+		}
+		if chunk.Error != nil {
+			onEvent(StreamEvent{Error: chunk.Error.Message, Done: true, FinishReason: "error"})
+			return fmt.Errorf("LLM stream error: %s", chunk.Error.Message)
+		}
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 		c := chunk.Choices[0]
@@ -193,12 +204,16 @@ func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model strin
 		// Check finish reason
 		if c.FinishReason != nil {
 			fr := *c.FinishReason
+			// Emit any content in this final chunk first
+			if delta.Content != nil && *delta.Content != "" {
+				onEvent(StreamEvent{Delta: *delta.Content})
+			}
 			if fr == "tool_calls" || (fr == "stop" && len(toolAcc) > 0) {
 				onEvent(StreamEvent{ToolCalls: buildToolCalls(toolAcc), FinishReason: "tool_calls"})
 				return nil
 			}
-			if fr == "stop" {
-				onEvent(StreamEvent{Done: true, FinishReason: "stop"})
+			if fr == "stop" || fr == "end_turn" || fr == "length" {
+				onEvent(StreamEvent{Done: true, FinishReason: fr})
 				return nil
 			}
 		}

@@ -1586,7 +1586,14 @@ func (s *Server) buildHistory(convID, mode string) []llm.ChatMessage {
 	}
 	chatMsgs := []llm.ChatMessage{{Role: "system", Content: sysPrompt}}
 	for _, m := range msgs {
-		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
+		last := &chatMsgs[len(chatMsgs)-1]
+		if last.Role == m.Role {
+			if s, ok := last.Content.(string); ok {
+				last.Content = s + "\n" + m.Content
+			}
+		} else {
+			chatMsgs = append(chatMsgs, llm.ChatMessage{Role: m.Role, Content: m.Content})
+		}
 	}
 	return chatMsgs
 }
