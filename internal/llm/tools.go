@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +18,6 @@ import (
 
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
-	"search_web": true, "search_images": true, "query_data": true,
 	"memory_recall": true, "memory_store": true, "ssh_exec": true,
 	"analyze_image": true, "task": true,
 }
@@ -67,45 +65,14 @@ var BuiltinTools = []ToolDef{
 		},
 	},
 	{
-		Name: "fetch_url", Description: "Fetch a URL. Returns extracted text and images as ![alt](url) markdown from HTML pages.",
+		Name: "fetch_url", Description: "Fetch a URL and return its content. Supports three modes: 'text' (default) extracts readable text, 'md' converts HTML to markdown preserving links/headings/lists, 'raw' returns the raw response body.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"url":  map[string]any{"type": "string"},
-				"mode": map[string]any{"type": "string", "description": "Optional: 'raw' for raw response, 'text' (default) for extracted text+images"},
+				"mode": map[string]any{"type": "string", "enum": []string{"text", "md", "raw"}, "description": "text (default): extracted readable text. md: HTML→markdown with links/headings. raw: raw response body."},
 			},
 			"required": []string{"url"},
-		},
-	},
-	{
-		Name: "search_web", Description: "Search the web for current information, news, answers, or any topic. Returns results with titles, URLs, and snippets.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
-			},
-			"required": []string{"query"},
-		},
-	},
-	{
-		Name: "search_images", Description: "Search for images on the web. Returns image URLs with titles.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
-			},
-			"required": []string{"query"},
-		},
-	},
-	{
-		Name: "query_data", Description: "Query live real-time data. Returns JSON and images as ![alt](url) markdown. Pass 'extra' for searches or station/breed IDs. Available categories: air_quality, alerts, apod, asteroids, astronauts, cat, cat_breed, cat_breeds, cme, earth_events, earth_image, earthquakes, earthquakes_significant, epic, fires, geomagnetic, impact_risk, ip_location, iss, nasa_media, nasa_tech, ocean_temp, solar, solar_flares, sunrise_sunset, tides, time, uv, weather, weather_hourly",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"category": map[string]any{"type": "string"},
-				"extra":    map[string]any{"type": "string", "description": "Optional: search query, station ID, or breed ID depending on category"},
-			},
-			"required": []string{"category"},
 		},
 	},
 	{
@@ -138,16 +105,6 @@ var BuiltinTools = []ToolDef{
 				"key": map[string]any{"type": "string"},
 			},
 			"required": []string{"key"},
-		},
-	},
-	{
-		Name: "image_generate", Description: "Generate an image from a text prompt. Returns a URL. Include as ![desc](url) to display.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"prompt": map[string]any{"type": "string"},
-			},
-			"required": []string{"prompt"},
 		},
 	},
 	{
@@ -208,8 +165,8 @@ var BuiltinTools = []ToolDef{
 
 type ToolContext struct {
 	DB               *sql.DB
-	GatewayURL       string
-	GatewayKey       string
+	APIBase          string
+	APIKey           string
 	ShellOutputLimit int
 	FetchLimit       int
 	FileReadLimit    int
@@ -218,7 +175,6 @@ type ToolContext struct {
 	SSHExec          func(server, command string, timeout int) (string, error)
 	SSHExit          func(server string) error
 	OnProgress       func(toolName, status string) // stream tool progress to client
-	GeneratedImages  []string                     // local paths of generated images
 }
 
 func (ctx *ToolContext) shellLimit() int {
@@ -243,27 +199,20 @@ func (ctx *ToolContext) fileReadLim() int {
 }
 
 // Task model resolution — different models for different tasks
-var TaskModelDefaults = map[string]string{
-	"title":             "google-ai-studio/models-gemma-3-4b-it",
-	"summary":           "google-ai-studio/models-gemma-3-27b-it",
-	"image_gen":         "pollinations-pollen/klein",
-	"image_recognition": "google-ai-studio/models-gemma-3-27b-it",
-	"subagent":          "google-ai-studio/models-gemma-4-26b-a4b-it",
-	"translation":       "google-ai-studio/models-gemma-3-12b-it",
-}
+var TaskModelDefaults = map[string]string{}
 
 func (ctx *ToolContext) ResolveTaskModel(task string) (string, string) {
 	// Check settings_kv for override: task_model_{task} = "model_id"
 	if ctx.DB != nil {
 		var model string
 		if err := ctx.DB.QueryRow("SELECT value FROM settings_kv WHERE key=?", "task_model_"+task).Scan(&model); err == nil && model != "" {
-			return ctx.GatewayURL, model
+			return ctx.APIBase, model
 		}
 	}
 	if m, ok := TaskModelDefaults[task]; ok {
-		return ctx.GatewayURL, m
+		return ctx.APIBase, m
 	}
-	return ctx.GatewayURL, ""
+	return ctx.APIBase, ""
 }
 
 func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, error) {
@@ -343,26 +292,25 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		body := string(data)
 		ct := resp.Header.Get("Content-Type")
 		mode := str("mode")
+		if mode == "" {
+			mode = "text"
+		}
 		if mode == "raw" || !strings.Contains(ct, "html") {
 			if len(body) > lim {
 				body = body[:lim] + "\n...(truncated)"
 			}
 			return body, nil
 		}
-		result := stripHTML(str("url"), body)
+		var result string
+		if mode == "md" {
+			result = htmlToMarkdown(str("url"), body)
+		} else {
+			result = stripHTML(str("url"), body)
+		}
 		if len(result) > lim {
 			result = result[:lim] + "\n...(truncated)"
 		}
 		return result, nil
-
-	case "search_web":
-		return queryGateway(ctx, "search_web", str("query"))
-
-	case "search_images":
-		return queryGateway(ctx, "image_search", str("query"))
-
-	case "query_data":
-		return queryGateway(ctx, str("category"), str("extra"))
 
 	case "memory_store":
 		if ctx.DB == nil {
@@ -416,9 +364,6 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 		ctx.DB.Exec("DELETE FROM memories WHERE key=?", key)
 		return "Deleted memory: " + key, nil
 
-	case "image_generate":
-		return generateImage(ctx, str("prompt"))
-
 	case "analyze_image":
 		return analyzeImage(ctx, str("url"), str("question"))
 
@@ -467,111 +412,6 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 	}
 }
 
-func queryGateway(ctx *ToolContext, category, extra string) (string, error) {
-	if ctx.GatewayURL == "" {
-		return "", fmt.Errorf("no gateway configured")
-	}
-	base := strings.TrimRight(ctx.GatewayURL, "/")
-	base = strings.TrimSuffix(base, "/chat/completions")
-	base = strings.TrimSuffix(base, "/v1")
-	u := fmt.Sprintf("%s/v1/data?q=%s&extra=%s", base, url.QueryEscape(category), url.QueryEscape(extra))
-	req, _ := http.NewRequest("GET", u, nil)
-	if ctx.GatewayKey != "" {
-		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
-	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 12000))
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("gateway %d: %s", resp.StatusCode, string(data))
-	}
-	return string(data), nil
-}
-
-func generateImage(ctx *ToolContext, prompt string) (string, error) {
-	if prompt == "" {
-		return "", fmt.Errorf("prompt required")
-	}
-	_, model := ctx.ResolveTaskModel("image_gen")
-	if model == "" {
-		model = "pollinations-pollen/klein"
-	}
-	base := strings.TrimRight(ctx.GatewayURL, "/")
-	base = strings.TrimSuffix(base, "/chat/completions")
-	base = strings.TrimSuffix(base, "/v1")
-
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","response_format":"b64_json","seed":%d}`,
-		model, strings.ReplaceAll(prompt, `"`, `\"`), time.Now().UnixMilli())
-
-	req, _ := http.NewRequest("POST", base+"/v1/images/generations", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if ctx.GatewayKey != "" {
-		req.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
-	}
-
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("image gen %d: %s", resp.StatusCode, string(data))
-	}
-
-	// Parse response — try b64_json first, then URL download
-	var result struct {
-		Data []struct {
-			URL     string `json:"url"`
-			B64JSON string `json:"b64_json"`
-		} `json:"data"`
-	}
-	json.Unmarshal(data, &result)
-	if len(result.Data) == 0 {
-		return "", fmt.Errorf("no image in response: %s", string(data)[:min(len(data), 200)])
-	}
-
-	var imgBytes []byte
-	if b64 := result.Data[0].B64JSON; b64 != "" {
-		imgBytes, _ = base64.StdEncoding.DecodeString(b64)
-	} else if u := result.Data[0].URL; u != "" {
-		dlReq, _ := http.NewRequest("GET", u, nil)
-		if ctx.GatewayKey != "" {
-			dlReq.Header.Set("Authorization", "Bearer "+ctx.GatewayKey)
-		}
-		dlResp, err := client.Do(dlReq)
-		if err == nil {
-			defer dlResp.Body.Close()
-			if dlResp.StatusCode == 200 {
-				imgBytes, _ = io.ReadAll(dlResp.Body)
-			}
-		}
-	}
-
-	if len(imgBytes) == 0 {
-		return "", fmt.Errorf("failed to download generated image")
-	}
-
-	dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "generated")
-	os.MkdirAll(dir, 0755)
-	fname := fmt.Sprintf("img_%d.png", time.Now().UnixMilli())
-	fpath := filepath.Join(dir, fname)
-	os.WriteFile(fpath, imgBytes, 0644)
-	// Copy to user-visible location — model can move/rename this freely
-	userDir := filepath.Join(os.Getenv("HOME"), "generated-images")
-	os.MkdirAll(userDir, 0755)
-	userPath := filepath.Join(userDir, fname)
-	os.WriteFile(userPath, imgBytes, 0644)
-	ctx.GeneratedImages = append(ctx.GeneratedImages, fpath)
-	localURL := fmt.Sprintf("/api/upload?path=%s", fpath)
-	return fmt.Sprintf("Image generated and saved to %s\nDisplay with: ![image](%s)", userPath, localURL), nil
-}
-
 func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 	if imgURL == "" {
 		return "", fmt.Errorf("url required")
@@ -605,8 +445,8 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 	// Resolve vision model
 	gwURL, model := ctx.ResolveTaskModel("image_recognition")
 	if model == "" {
-		gwURL = ctx.GatewayURL
-		model = "google-ai-studio/models-gemma-3-27b-it"
+		gwURL = ctx.APIBase
+		model = "gpt-4o"
 	}
 
 	// Build multimodal message
@@ -618,7 +458,7 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 		},
 	}}
 
-	prov := &OpenAI{APIKey: ctx.GatewayKey, APIBase: gwURL}
+	prov := &OpenAI{APIKey: ctx.APIKey, APIBase: gwURL}
 	var result strings.Builder
 	err = prov.Stream(context.Background(), msgs, model, nil, func(ev StreamEvent) {
 		if ev.Delta != "" {
@@ -636,8 +476,7 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 }
 
 var subagentReadOnly = map[string]bool{
-	"search_web": true, "search_images": true, "fetch_url": true,
-	"read_file": true, "list_directory": true, "query_data": true,
+	"fetch_url": true, "read_file": true, "list_directory": true,
 	"memory_recall": true,
 }
 
@@ -649,8 +488,8 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 	// Resolve subagent model
 	gwURL, model := ctx.ResolveTaskModel("subagent")
 	if model == "" {
-		gwURL = ctx.GatewayURL
-		model = "google-ai-studio/models-gemma-4-26b-a4b-it"
+		gwURL = ctx.APIBase
+		model = "gpt-4o"
 	}
 
 	// Build read-only tool set
@@ -663,9 +502,9 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 
 	// Build subagent context (read-only)
 	subCtx := &ToolContext{
-		DB:         ctx.DB,
-		GatewayURL: ctx.GatewayURL,
-		GatewayKey: ctx.GatewayKey,
+		DB:      ctx.DB,
+		APIBase: ctx.APIBase,
+		APIKey:  ctx.APIKey,
 	}
 
 	msgs := []ChatMessage{
@@ -673,7 +512,7 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 		{Role: "user", Content: prompt},
 	}
 
-	prov := &OpenAI{APIKey: ctx.GatewayKey, APIBase: gwURL}
+	prov := &OpenAI{APIKey: ctx.APIKey, APIBase: gwURL}
 	orch := &Orchestrator{
 		Provider: prov,
 		Model:    model,
@@ -705,6 +544,116 @@ var reSpaces = regexp.MustCompile(`[ \t]+`)
 var reBlankLines = regexp.MustCompile(`\n{3,}`)
 var reImg = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["'][^>]*(?:alt=["']([^"']*)["'])?`)
 var reOG = regexp.MustCompile(`(?i)<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']`)
+
+func htmlToMarkdown(rawURL, body string) string {
+	u, _ := url.Parse(rawURL)
+	base := ""
+	if u != nil {
+		base = u.Scheme + "://" + u.Host
+	}
+	absURL := func(src string) string {
+		if strings.HasPrefix(src, "http") {
+			return src
+		}
+		if strings.HasPrefix(src, "/") {
+			return base + src
+		}
+		return base + "/" + src
+	}
+
+	// Remove script/style/nav/footer
+	text := body
+	for _, tag := range []string{"script", "style", "nav", "footer"} {
+		re := regexp.MustCompile(`(?is)<` + tag + `\b[^>]*>.*?</` + tag + `>`)
+		text = re.ReplaceAllString(text, "")
+	}
+
+	// Convert headings
+	for i := 6; i >= 1; i-- {
+		prefix := strings.Repeat("#", i)
+		re := regexp.MustCompile(fmt.Sprintf(`(?is)<h%d[^>]*>(.*?)</h%d>`, i, i))
+		text = re.ReplaceAllStringFunc(text, func(m string) string {
+			inner := re.FindStringSubmatch(m)
+			if len(inner) > 1 {
+				return "\n" + prefix + " " + reTag.ReplaceAllString(inner[1], "") + "\n"
+			}
+			return m
+		})
+	}
+
+	// Convert links
+	reLink := regexp.MustCompile(`(?is)<a\b[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)
+	text = reLink.ReplaceAllStringFunc(text, func(m string) string {
+		parts := reLink.FindStringSubmatch(m)
+		if len(parts) > 2 {
+			href := absURL(parts[1])
+			label := strings.TrimSpace(reTag.ReplaceAllString(parts[2], ""))
+			if label == "" {
+				label = href
+			}
+			return "[" + label + "](" + href + ")"
+		}
+		return m
+	})
+
+	// Convert images
+	reImgTag := regexp.MustCompile(`(?is)<img\b[^>]*src="([^"]*)"[^>]*>`)
+	text = reImgTag.ReplaceAllStringFunc(text, func(m string) string {
+		parts := reImgTag.FindStringSubmatch(m)
+		if len(parts) > 1 {
+			src := absURL(parts[1])
+			alt := "image"
+			if altMatch := regexp.MustCompile(`alt="([^"]*)"`).FindStringSubmatch(m); len(altMatch) > 1 {
+				alt = altMatch[1]
+			}
+			return "![" + alt + "](" + src + ")"
+		}
+		return m
+	})
+
+	// Convert lists
+	text = regexp.MustCompile(`(?is)<li[^>]*>`).ReplaceAllString(text, "\n- ")
+	text = regexp.MustCompile(`(?is)</li>`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`(?is)</?[ou]l[^>]*>`).ReplaceAllString(text, "\n")
+
+	// Convert paragraphs and breaks
+	text = regexp.MustCompile(`(?is)<br\s*/?\s*>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)</?p[^>]*>`).ReplaceAllString(text, "\n")
+	text = regexp.MustCompile(`(?is)</?div[^>]*>`).ReplaceAllString(text, "\n")
+
+	// Convert bold/italic
+	text = regexp.MustCompile(`(?is)<(?:b|strong)[^>]*>(.*?)</(?:b|strong)>`).ReplaceAllString(text, "**$1**")
+	text = regexp.MustCompile(`(?is)<(?:i|em)[^>]*>(.*?)</(?:i|em)>`).ReplaceAllString(text, "*$1*")
+
+	// Convert code
+	text = regexp.MustCompile(`(?is)<code[^>]*>(.*?)</code>`).ReplaceAllString(text, "`$1`")
+	text = regexp.MustCompile(`(?is)<pre[^>]*>(.*?)</pre>`).ReplaceAllString(text, "\n```\n$1\n```\n")
+
+	// Strip remaining tags
+	text = reTag.ReplaceAllString(text, "")
+
+	// Decode entities
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&quot;", "\"")
+	text = strings.ReplaceAll(text, "&#39;", "'")
+
+	// Clean up whitespace
+	text = reSpaces.ReplaceAllString(text, " ")
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	text = strings.Join(out, "\n")
+	text = reBlankLines.ReplaceAllString(text, "\n\n")
+	return text
+}
 
 func stripHTML(rawURL, body string) string {
 	u, _ := url.Parse(rawURL)

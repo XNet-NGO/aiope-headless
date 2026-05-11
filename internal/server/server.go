@@ -51,8 +51,7 @@ Do not make up information — use tools to verify facts.
 Use tools proactively when they can help — don't just describe what you could do.
 For multi-step tasks, chain tools together. Use parallel execution for independent read operations.
 When a tool fails, explain what happened and try an alternative approach.
-Use search_web for current events and facts. Use query_data for weather, space, earthquakes, and live data.
-Use task to delegate independent research to a subagent — it runs in parallel with read-only tools.
+Use fetch_url to retrieve web pages (mode: text, md, or raw). Use task to delegate independent research to a subagent.
 Each tool call must include ALL required parameters with valid values. Never send empty arguments.
 
 ## Response Style
@@ -723,8 +722,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 	// Save assistant message
 	if fullContent != "" {
-		log.Printf("saving message: generatedImages=%v", toolCtx.GeneratedImages)
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, toolCtx.GeneratedImages...)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -774,8 +772,8 @@ func (s *Server) autoTitle(convID, userMsg string) {
 	// Use title task model if available
 	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
-		toolCtx.GatewayURL = active.APIBase
-		toolCtx.GatewayKey = active.APIKey
+		toolCtx.APIBase = active.APIBase
+		toolCtx.APIKey = active.APIKey
 	}
 	_, model := toolCtx.ResolveTaskModel("title")
 	if model == "" {
@@ -1475,7 +1473,7 @@ func ListenAndServe(bind string, port int, handler http.Handler) error {
 
 // --- Chat action handlers ---
 
-func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, []string, error) {
+func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.ChatMessage) (string, error) {
 	s.Hub.BroadcastJSON(map[string]any{"type": "stream.start", "conversationId": convID, "messageId": assistantID})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1519,14 +1517,14 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 		},
 	}
 	content, err := orch.Run(chatMsgs)
-	return content, toolCtx.GeneratedImages, err
+	return content, err
 }
 
 func (s *Server) buildToolContext() *llm.ToolContext {
 	tc := s.newToolContext()
 	if p := s.Providers.GetActive(); p != nil {
-		tc.GatewayURL = p.APIBase
-		tc.GatewayKey = p.APIKey
+		tc.APIBase = p.APIBase
+		tc.APIKey = p.APIKey
 		if mc, ok := p.ModelConfigs[p.SelectedModelID]; ok {
 			tc.ShellOutputLimit = mc.ShellOutputLimit
 			tc.FetchLimit = mc.FetchLimit
@@ -1598,13 +1596,13 @@ func (s *Server) handleRetry(_ context.Context, client *ws.Client, convID string
 
 	chatMsgs := s.buildHistory(convID, mode)
 	assistantID := uuid.NewString()
-	fullContent, genImages, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
 	if err != nil {
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
 		return
 	}
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, genImages...)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -1629,13 +1627,13 @@ func (s *Server) handleEditResend(_ context.Context, client *ws.Client, convID, 
 
 	chatMsgs := s.buildHistory(convID, mode)
 	assistantID := uuid.NewString()
-	fullContent, genImages, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
+	fullContent, err := s.streamToConv(convID, assistantID, mode, chatMsgs)
 	if err != nil {
 		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
 		return
 	}
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent, genImages...)
+		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -1692,8 +1690,8 @@ func (s *Server) handleCompact(client *ws.Client, convID string, atIndex int) {
 	// Use summary task model
 	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
-		toolCtx.GatewayURL = active.APIBase
-		toolCtx.GatewayKey = active.APIKey
+		toolCtx.APIBase = active.APIBase
+		toolCtx.APIKey = active.APIKey
 	}
 	_, summaryModel := toolCtx.ResolveTaskModel("summary")
 
@@ -1795,8 +1793,8 @@ func (s *Server) handleTranslate(client *ws.Client, convID, messageID, language 
 
 	toolCtx := s.newToolContext()
 	if active := s.Providers.GetActive(); active != nil {
-		toolCtx.GatewayURL = active.APIBase
-		toolCtx.GatewayKey = active.APIKey
+		toolCtx.APIBase = active.APIBase
+		toolCtx.APIKey = active.APIKey
 	}
 	_, transModel := toolCtx.ResolveTaskModel("translation")
 
