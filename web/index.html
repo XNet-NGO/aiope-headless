@@ -318,7 +318,7 @@ function connectWS(){
         if(m.conversationId===S.active){const t=S.streamTools.find(x=>x.id===m.toolCallId);if(t){t.status=m.isError?'error':'done';t.result=m.result||''}renderStreamDelta()}
         break;
       case 'stream.end':
-        if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];updateSendBtn()}
+        if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()}
         break;
       case 'stream.error':
         if(m.conversationId===S.active){S.streaming=false;S.streamId=null;appendError(m.error);updateSendBtn()}
@@ -402,7 +402,7 @@ function renderMessages(){
     html+='<div class="msg msg-assistant">';
     if(S.streamReasoning)html+=renderReasoning(S.streamReasoning,true);
     if(S.streamTools.length)html+=renderToolStrip(S.streamTools);
-    html+=`<span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
+    html+=`<span id="streamEl">${streamHtml(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
   }
   el.innerHTML=html;
   el.scrollTop=el.scrollHeight;
@@ -436,6 +436,15 @@ function renderToolStrip(tools){
 }
 
 let streamRaf=0;let lastStreamRender=0;
+function streamHtml(s){
+  // Lightweight: escape HTML, preserve code blocks and newlines
+  s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  s=s.replace(/```(\w*)\n([\s\S]*?)```/g,(_,lang,code)=>`<pre><code class="language-${lang}">${code}</code></pre>`);
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\n/g,'<br>');
+  return s;
+}
 function renderStreamDelta(){
   if(streamRaf)return;
   const now=Date.now();
@@ -463,7 +472,7 @@ function renderStreamDelta(){
         else el.before(newStrip.firstChild);
       }
     }
-    el.innerHTML=md(S.streamContent);
+    el.innerHTML=streamHtml(S.streamContent);
     const container=document.getElementById('messages');
     container.scrollTop=container.scrollHeight;
   });
