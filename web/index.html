@@ -444,41 +444,32 @@ function streamHtml(s){
   s=s.replace(/\n/g,'<br>');
   return s;
 }
-let toolsDirty=false;
-function renderStreamDelta(isToolEvent){
-  if(isToolEvent)toolsDirty=true;
-  if(streamRaf&&!toolsDirty)return;
-  if(streamRaf&&toolsDirty){clearTimeout(streamRaf);streamRaf=0;}
-  const now=Date.now();
-  const delay=(!toolsDirty&&S.streamContent.length>2000)?300:16;
-  if(now-lastStreamRender<delay&&!toolsDirty){
-    streamRaf=setTimeout(()=>{streamRaf=0;renderStreamDelta()},delay);
-    return;
-  }
-  lastStreamRender=now;
-  toolsDirty=false;
-  streamRaf=requestAnimationFrame(()=>{
-    streamRaf=0;
-    const el=document.getElementById('streamEl');
-    if(!el){renderMessages();return}
-    const msg=el.closest('.msg');
-    if(msg){
-      let rBlock=msg.querySelector('.reasoning');
-      if(S.streamReasoning){
-        if(!rBlock){const d=document.createElement('div');d.innerHTML=renderReasoning(S.streamReasoning,true);msg.insertBefore(d.firstChild,msg.firstChild);rBlock=msg.querySelector('.reasoning')}
-        else{rBlock.querySelector('.reasoning-text').textContent=S.streamReasoning;rBlock.className='reasoning active'}
-      }
-      let strip=msg.querySelector('.tool-strip');
-      if(S.streamTools.length){
-        const newStrip=document.createElement('div');newStrip.innerHTML=renderToolStrip(S.streamTools);
-        if(strip)strip.replaceWith(newStrip.firstChild);
-        else el.before(newStrip.firstChild);
-      }
+function doStreamRender(){
+  const el=document.getElementById('streamEl');
+  if(!el){renderMessages();return}
+  const msg=el.closest('.msg');
+  if(msg){
+    let rBlock=msg.querySelector('.reasoning');
+    if(S.streamReasoning){
+      if(!rBlock){const d=document.createElement('div');d.innerHTML=renderReasoning(S.streamReasoning,true);msg.insertBefore(d.firstChild,msg.firstChild);rBlock=msg.querySelector('.reasoning')}
+      else{rBlock.querySelector('.reasoning-text').textContent=S.streamReasoning;rBlock.className='reasoning active'}
     }
-    el.innerHTML=streamHtml(S.streamContent);
-    const container=document.getElementById('messages');
-    container.scrollTop=container.scrollHeight;
-  });
+    let strip=msg.querySelector('.tool-strip');
+    if(S.streamTools.length){
+      const newStrip=document.createElement('div');newStrip.innerHTML=renderToolStrip(S.streamTools);
+      if(strip)strip.replaceWith(newStrip.firstChild);
+      else el.before(newStrip.firstChild);
+    }
+  }
+  el.innerHTML=streamHtml(S.streamContent);
+  const container=document.getElementById('messages');
+  container.scrollTop=container.scrollHeight;
+}
+function renderStreamDelta(isToolEvent){
+  if(isToolEvent){clearTimeout(streamRaf);streamRaf=0;doStreamRender();return}
+  if(streamRaf)return;
+  const delay=S.streamContent.length>2000?300:16;
+  streamRaf=setTimeout(()=>{streamRaf=0;doStreamRender()},delay);
 }
 
 function updateSendBtn(){
