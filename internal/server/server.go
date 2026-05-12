@@ -1165,9 +1165,13 @@ func (s *Server) healthRemoteServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	result, err := s.Remote.Exec(srv.ID, "__aiope_health__", 10)
-	if err != nil {
-		http.Error(w, err.Error(), 502)
-		return
+	if err != nil || !json.Valid([]byte(result)) {
+		// Daemon not deployed — fall back to basic shell health
+		result, err = s.Remote.Exec(srv.ID, `printf '{"os":"%s","arch":"%s","hostname":"%s","uptime":"%s","daemon":false}' "$(uname -s)" "$(uname -m)" "$(hostname)" "$(uptime -p 2>/dev/null||uptime)"`, 10)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
 	}
 	// Parse and store health info
 	var health map[string]any
