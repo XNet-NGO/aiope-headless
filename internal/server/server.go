@@ -728,8 +728,17 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 	fullContent, err := orch.Run(chatMsgs)
 	if err != nil {
-		log.Printf("LLM error: %v", err)
-		s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
+		if streamCtx.Err() != nil {
+			// User cancelled
+			s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": convID, "messageId": assistantID, "finishReason": "cancelled"})
+		} else {
+			log.Printf("LLM error: %v", err)
+			s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})
+		}
+		// Save partial content if any
+		if fullContent != "" {
+			s.Messages.Add(convID, "assistant", fullContent)
+		}
 		return
 	}
 
