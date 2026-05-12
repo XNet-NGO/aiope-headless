@@ -99,10 +99,11 @@ func (o *OpenAI) Stream(ctx context.Context, messages []ChatMessage, model strin
 			}
 		}
 		body["tools"] = tdefs
+		body["tool_choice"] = "auto"
 	}
 
 	data, _ := json.Marshal(body)
-	log.Printf("LLM request: model=%s messages=%d len=%d", model, len(messages), len(data))
+	log.Printf("LLM request: model=%s messages=%d tools=%d len=%d", model, len(messages), len(tools), len(data))
 	endpoint := "/chat/completions"
 	if o.EndpointOverride != "" {
 		endpoint = o.EndpointOverride
