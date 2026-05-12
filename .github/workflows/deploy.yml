@@ -1,0 +1,56 @@
+name: Deploy
+on:
+  push:
+    branches: [standalone]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build binary
+        run: CGO_ENABLED=0 go build -ldflags="-s -w" -o aiope-headless .
+
+      - name: Build Docker image
+        run: docker build -t aiope-standalone .
+
+      - name: Save image
+        run: docker save aiope-standalone | gzip > /tmp/aiope-standalone.tar.gz
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 2222 dev.xnet.ngo >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy image to server
+        run: |
+          scp -P 2222 -i ~/.ssh/id_ed25519 /tmp/aiope-standalone.tar.gz \
+            xnet-admin@dev.xnet.ngo:/tmp/aiope-standalone.tar.gz
+
+      - name: Load and restart on server
+        run: |
+          ssh -p 2222 -i ~/.ssh/id_ed25519 xnet-admin@dev.xnet.ngo << 'EOF'
+          docker load < /tmp/aiope-standalone.tar.gz
+          docker stop aiope-dev && docker rm aiope-dev
+          docker run -d --name aiope-dev --restart unless-stopped \
+            -p 9801:8090 \
+            -v /home/xnet-admin/.aiope-standalone:/data \
+            -e AIOPE_PASSWORD="${AIOPE_PASSWORD}" \
+            -e AIOPE_BASE_PATH=/ai \
+            aiope-standalone:latest
+          rm /tmp/aiope-standalone.tar.gz
+          EOF
+
+      - name: Verify
+        run: |
+          sleep 3
+          ssh -p 2222 -i ~/.ssh/id_ed25519 xnet-admin@dev.xnet.ngo \
+            "docker logs aiope-dev --tail 1 && curl -s -o /dev/null -w '%{http_code}' http://localhost:9801/login"

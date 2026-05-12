@@ -64,7 +64,14 @@ Keep responses focused — answer the question, then stop.
 For code: always use fenced code blocks with the language specified.
 For commands: show the command, then the expected output.
 For errors: explain what went wrong and suggest a fix.
-For multi-step tasks: number the steps and execute them sequentially.`
+For multi-step tasks: number the steps and execute them sequentially.
+
+## Deployment
+This server (AIOPE Headless) runs as Docker container "aiope-dev" on dev.xnet.ngo behind Caddy at /ai.
+SSH access: ssh_start "xnet-dev" (port 2222, user xnet-admin).
+Source: ~/projects/aiope-headless (standalone branch). Build: docker build -t aiope-standalone .
+Deploy: docker stop aiope-dev && docker rm aiope-dev && docker run -d --name aiope-dev --restart unless-stopped -p 9801:8090 -v ~/.aiope-standalone:/data -e AIOPE_PASSWORD=<pw> -e AIOPE_BASE_PATH=/ai aiope-standalone:latest
+Caddy: /etc/caddy/Caddyfile — handle /ai* strips prefix → localhost:9801, default → localhost:9800 (drop).`
 
 type Server struct {
 	Conversations *conversation.Service
