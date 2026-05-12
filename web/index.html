@@ -312,10 +312,10 @@ function connectWS(){
         if(m.conversationId===S.active){S.streamReasoning+=m.delta;renderStreamDelta()}
         break;
       case 'stream.tool_call':
-        if(m.conversationId===S.active){S.streamTools.push({id:m.toolCall.id,name:m.toolCall.name,args:JSON.stringify(m.toolCall.arguments,null,2),status:'running',result:''});renderStreamDelta()}
+        if(m.conversationId===S.active){S.streamTools.push({id:m.toolCall.id,name:m.toolCall.name,args:JSON.stringify(m.toolCall.arguments,null,2),status:'running',result:''});renderStreamDelta(true)}
         break;
       case 'stream.tool_result':
-        if(m.conversationId===S.active){const t=S.streamTools.find(x=>x.id===m.toolCallId);if(t){t.status=m.isError?'error':'done';t.result=m.result||''}renderStreamDelta()}
+        if(m.conversationId===S.active){const t=S.streamTools.find(x=>x.id===m.toolCallId);if(t){t.status=m.isError?'error':'done';t.result=m.result||''}renderStreamDelta(true)}
         break;
       case 'stream.end':
         if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()}
@@ -437,7 +437,6 @@ function renderToolStrip(tools){
 
 let streamRaf=0;let lastStreamRender=0;
 function streamHtml(s){
-  // Lightweight: escape HTML, preserve code blocks and newlines
   s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   s=s.replace(/```(\w*)\n([\s\S]*?)```/g,(_,lang,code)=>`<pre><code class="language-${lang}">${code}</code></pre>`);
   s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
@@ -445,15 +444,19 @@ function streamHtml(s){
   s=s.replace(/\n/g,'<br>');
   return s;
 }
-function renderStreamDelta(){
-  if(streamRaf)return;
+let toolsDirty=false;
+function renderStreamDelta(isToolEvent){
+  if(isToolEvent)toolsDirty=true;
+  if(streamRaf&&!toolsDirty)return;
+  if(streamRaf&&toolsDirty){clearTimeout(streamRaf);streamRaf=0;}
   const now=Date.now();
-  const delay=S.streamContent.length>2000?300:16;
-  if(now-lastStreamRender<delay){
+  const delay=(!toolsDirty&&S.streamContent.length>2000)?300:16;
+  if(now-lastStreamRender<delay&&!toolsDirty){
     streamRaf=setTimeout(()=>{streamRaf=0;renderStreamDelta()},delay);
     return;
   }
   lastStreamRender=now;
+  toolsDirty=false;
   streamRaf=requestAnimationFrame(()=>{
     streamRaf=0;
     const el=document.getElementById('streamEl');
