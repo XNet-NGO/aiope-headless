@@ -405,6 +405,7 @@ function renderMessages(){
     html+=`<span id="streamEl">${md(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
   }
   el.innerHTML=html;
+  el.scrollTop=el.scrollHeight;
   // Patch external images: swap to local copy if available, hide if broken
   el.querySelectorAll('.msg').forEach((msgEl,i)=>{
     const m=S.msgs[i];if(!m)return;
@@ -434,15 +435,20 @@ function renderToolStrip(tools){
   }).join('')+'</div>';
 }
 
-let streamRaf=0;
+let streamRaf=0;let lastStreamRender=0;
 function renderStreamDelta(){
   if(streamRaf)return;
+  const now=Date.now();
+  const delay=S.streamContent.length>2000?300:16;
+  if(now-lastStreamRender<delay){
+    streamRaf=setTimeout(()=>{streamRaf=0;renderStreamDelta()},delay);
+    return;
+  }
+  lastStreamRender=now;
   streamRaf=requestAnimationFrame(()=>{
     streamRaf=0;
-    // Find or rebuild the streaming message
     const el=document.getElementById('streamEl');
     if(!el){renderMessages();return}
-    // Update reasoning
     const msg=el.closest('.msg');
     if(msg){
       let rBlock=msg.querySelector('.reasoning');
@@ -450,7 +456,6 @@ function renderStreamDelta(){
         if(!rBlock){const d=document.createElement('div');d.innerHTML=renderReasoning(S.streamReasoning,true);msg.insertBefore(d.firstChild,msg.firstChild);rBlock=msg.querySelector('.reasoning')}
         else{rBlock.querySelector('.reasoning-text').textContent=S.streamReasoning;rBlock.className='reasoning active'}
       }
-      // Update tool strip
       let strip=msg.querySelector('.tool-strip');
       if(S.streamTools.length){
         const newStrip=document.createElement('div');newStrip.innerHTML=renderToolStrip(S.streamTools);
@@ -459,6 +464,8 @@ function renderStreamDelta(){
       }
     }
     el.innerHTML=md(S.streamContent);
+    const container=document.getElementById('messages');
+    container.scrollTop=container.scrollHeight;
   });
 }
 
