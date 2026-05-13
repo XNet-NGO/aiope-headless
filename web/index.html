@@ -846,6 +846,8 @@ async function saveAndActivate(){
 
 async function activateProvider(id){
   await api.post('/api/providers/'+id+'/activate');
+  modelCache=[];S.activeProviderId=id;
+  await loadModelLabel();
   renderProviderSettings();
 }
 

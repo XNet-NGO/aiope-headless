@@ -450,6 +450,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case msg, ok := <-client.Send:
@@ -457,6 +459,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				conn.Write(ctx, websocket.MessageText, msg)
+			case <-ticker.C:
+				conn.Ping(ctx)
 			case <-ctx.Done():
 				return
 			}
