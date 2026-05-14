@@ -525,6 +525,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "chat.cancel":
 			if fn, ok := s.cancels.LoadAndDelete(msg.ConversationID); ok {
 				fn.(context.CancelFunc)()
+				s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": msg.ConversationID, "finishReason": "cancelled"})
 			}
 		case "chat.auto_run":
 			enabled := msg.Content == "true" || msg.Content == "1"
@@ -734,8 +735,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 	fullContent, err := orch.Run(chatMsgs)
 	if err != nil {
 		if streamCtx.Err() != nil {
-			// User cancelled
-			s.Hub.BroadcastJSON(map[string]any{"type": "stream.end", "conversationId": convID, "messageId": assistantID, "finishReason": "cancelled"})
+			// Already sent stream.end from cancel handler
 		} else {
 			log.Printf("LLM error: %v", err)
 			s.Hub.BroadcastJSON(map[string]any{"type": "stream.error", "conversationId": convID, "error": err.Error()})

@@ -402,7 +402,7 @@ function renderMessages(){
     html+='<div class="msg msg-assistant">';
     if(S.streamReasoning)html+=renderReasoning(S.streamReasoning,true);
     if(S.streamTools.length)html+=renderToolStrip(S.streamTools);
-    html+=`<span id="streamEl">${streamHtml(S.streamContent)}</span><span class="streaming-cursor"></span></div>`;
+    html+=`<span id="streamEl"${S.streamContent?'':' style="display:none"'}>${streamHtml(S.streamContent)}</span>${S.streamContent?'<span class="streaming-cursor"></span>':''}</div>`;
   }
   el.innerHTML=html;
   el.scrollTop=el.scrollHeight;
@@ -462,6 +462,7 @@ function doStreamRender(){
     }
   }
   el.innerHTML=streamHtml(S.streamContent);
+  el.style.display=S.streamContent?'':'none';
   const container=document.getElementById('messages');
   container.scrollTop=container.scrollHeight;
 }
@@ -484,17 +485,26 @@ function appendError(err){
 }
 
 async function newChat(){
-  // Reuse top conv if it's empty
+  // Reuse current conv if it's empty, or top conv if empty
+  if(S.active&&S.msgs.length===0){
+    document.getElementById('chatTitle').textContent='AIOPE';
+    renderMessages();renderSidebar();
+    document.getElementById('input').focus();
+    if(window.innerWidth<768)toggleSidebar();
+    return;
+  }
   if(S.convs.length>0){
     const top=S.convs[0];
-    const data=await api.get('/api/conversations/'+top.id);
-    if(!data.messages||data.messages.length===0){
-      S.active=top.id;S.msgs=[];
-      document.getElementById('chatTitle').textContent='AIOPE';
-      renderMessages();renderSidebar();
-      document.getElementById('input').focus();
-      if(window.innerWidth<768)toggleSidebar();
-      return;
+    if(top.id!==S.active){
+      const data=await api.get('/api/conversations/'+top.id);
+      if(!data.messages||data.messages.length===0){
+        S.active=top.id;S.msgs=[];
+        document.getElementById('chatTitle').textContent='AIOPE';
+        renderMessages();renderSidebar();
+        document.getElementById('input').focus();
+        if(window.innerWidth<768)toggleSidebar();
+        return;
+      }
     }
   }
   const r=await api.post('/api/conversations',{title:'New Chat'});

@@ -116,6 +116,11 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 			o.OnEvent(StreamEvent{ToolResults: []ToolResultInfo{r}})
 		})
 
+		// Bail if cancelled during tool execution
+		if ctx.Err() != nil {
+			return fullContent.String(), nil
+		}
+
 		// Log results
 		for _, r := range results {
 			if r.IsErr || len(r.Result) < 50 {
