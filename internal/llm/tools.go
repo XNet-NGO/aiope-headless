@@ -602,6 +602,7 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, _ := http.NewRequest("GET", u, nil)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("User-Agent", "aiope-headless/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -623,7 +624,11 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(body, &data); err != nil {
-		return "", fmt.Errorf("search parse: %v", err)
+		snippet := string(body)
+		if len(snippet) > 100 {
+			snippet = snippet[:100]
+		}
+		return "", fmt.Errorf("search parse (%d bytes): %v: %s", len(body), err, snippet)
 	}
 	if len(data.Results) == 0 {
 		return "No results found.", nil
