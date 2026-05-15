@@ -402,7 +402,7 @@ function renderMessages(){
     html+='<div class="msg msg-assistant">';
     if(S.streamReasoning)html+=renderReasoning(S.streamReasoning,true);
     if(S.streamTools.length)html+=renderToolStrip(S.streamTools);
-    html+=`<span id="streamEl"${S.streamContent?'':' style="display:none"'}>${streamHtml(S.streamContent)}</span>${S.streamContent?'<span class="streaming-cursor"></span>':''}</div>`;
+    html+=`<span id="streamEl"${S.streamContent.trim()?'':' style="display:none"'}>${streamHtml(S.streamContent)}</span>${S.streamContent.trim()?'<span class="streaming-cursor"></span>':''}</div>`;
   }
   el.innerHTML=html;
   el.scrollTop=el.scrollHeight;
@@ -437,6 +437,7 @@ function renderToolStrip(tools){
 
 let streamRaf=0;let lastStreamRender=0;
 function streamHtml(s){
+  s=s.replace(/^\n+/,'').replace(/\n+$/,'');
   s=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   s=s.replace(/```(\w*)\n([\s\S]*?)```/g,(_,lang,code)=>`<pre><code class="language-${lang}">${code}</code></pre>`);
   s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
@@ -462,7 +463,7 @@ function doStreamRender(){
     }
   }
   el.innerHTML=streamHtml(S.streamContent);
-  el.style.display=S.streamContent?'':'none';
+  el.style.display=S.streamContent.trim()?'':'none';
   const container=document.getElementById('messages');
   container.scrollTop=container.scrollHeight;
 }
