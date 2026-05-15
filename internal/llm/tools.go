@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	_ "image/gif"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/image/bmp"
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/tiff"
+	"golang.org/x/image/tiff"
 	"golang.org/x/image/webp"
 )
 
@@ -462,8 +462,16 @@ func convertImageToJPEG(data []byte, mime string) ([]byte, error) {
 		img, err = png.Decode(r)
 	case "image/bmp":
 		img, err = bmp.Decode(r)
+	case "image/gif":
+		g, gerr := gif.DecodeAll(r)
+		if gerr != nil || len(g.Image) == 0 {
+			err = fmt.Errorf("gif decode: %v", gerr)
+		} else {
+			img = g.Image[0]
+		}
+	case "image/tiff":
+		img, err = tiff.Decode(r)
 	default:
-		// image.Decode handles JPEG (incl progressive), GIF, TIFF via registered decoders
 		img, _, err = image.Decode(r)
 	}
 	if err != nil {
