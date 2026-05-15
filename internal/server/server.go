@@ -582,9 +582,9 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 
 	// System prompt from settings
 	allSettings, _ := s.Settings.All()
-	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
-	if sysPrompt == "" {
-		sysPrompt = defaultSystemPrompt
+	sysPrompt := defaultSystemPrompt
+	if extra := llm.BuildSystemPrompt(allSettings, mode); extra != "" {
+		sysPrompt += "\n\n" + extra
 	}
 	// Apply per-model system prompt override
 	if p := s.Providers.GetActive(); p != nil {
@@ -1605,9 +1605,9 @@ func (s *Server) getEnabledTools(mode string) []llm.ToolDef {
 func (s *Server) buildHistory(convID, mode string) []llm.ChatMessage {
 	msgs, _ := s.Messages.List(convID)
 	allSettings, _ := s.Settings.All()
-	sysPrompt := llm.BuildSystemPrompt(allSettings, mode)
-	if sysPrompt == "" {
-		sysPrompt = defaultSystemPrompt
+	sysPrompt := defaultSystemPrompt
+	if extra := llm.BuildSystemPrompt(allSettings, mode); extra != "" {
+		sysPrompt += "\n\n" + extra
 	}
 	chatMsgs := []llm.ChatMessage{{Role: "system", Content: sysPrompt}}
 	for _, m := range msgs {
