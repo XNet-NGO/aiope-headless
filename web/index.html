@@ -442,6 +442,7 @@ function streamHtml(s){
   s=s.replace(/```(\w*)\n([\s\S]*?)```/g,(_,lang,code)=>`<pre><code class="language-${lang}">${code}</code></pre>`);
   s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
   s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\n{2,}/g,'<br>');
   s=s.replace(/\n/g,'<br>');
   return s;
 }
