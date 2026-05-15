@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 var ParallelSafe = map[string]bool{
 	"read_file": true, "list_directory": true, "fetch_url": true,
+	"search_web": true, "search_images": true,
 	"memory_recall": true, "memory_store": true, "ssh_exec": true,
 	"analyze_image": true, "task": true,
 }
@@ -73,6 +75,26 @@ var BuiltinTools = []ToolDef{
 				"mode": map[string]any{"type": "string", "enum": []string{"text", "md", "raw"}, "description": "text (default): extracted readable text. md: HTML→markdown with links/headings. raw: raw response body."},
 			},
 			"required": []string{"url"},
+		},
+	},
+	{
+		Name: "search_web", Description: "Search the web for current information, news, answers, or any topic. Returns results with titles, URLs, and snippets.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []string{"query"},
+		},
+	},
+	{
+		Name: "search_images", Description: "Search for images on the web. Returns image URLs with titles.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []string{"query"},
 		},
 	},
 	{
@@ -167,6 +189,7 @@ type ToolContext struct {
 	DB               *sql.DB
 	APIBase          string
 	APIKey           string
+	SearxURL         string
 	ShellOutputLimit int
 	FetchLimit       int
 	FileReadLimit    int
@@ -311,6 +334,12 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 			result = result[:lim] + "\n...(truncated)"
 		}
 		return result, nil
+
+	case "search_web":
+		return searxQuery(ctx, str("query"), "")
+
+	case "search_images":
+		return searxQuery(ctx, str("query"), "images")
 
 	case "memory_store":
 		if ctx.DB == nil {
@@ -476,6 +505,7 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 }
 
 var subagentReadOnly = map[string]bool{
+	"search_web": true, "search_images": true,
 	"fetch_url": true, "read_file": true, "list_directory": true,
 	"memory_recall": true,
 }
@@ -537,6 +567,78 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 		return "<task_result>No results found.</task_result>", nil
 	}
 	return fmt.Sprintf("<task_result>\n%s\n</task_result>", result), nil
+}
+
+const defaultSearxURL = "https://search.xnet.ngo"
+
+func (ctx *ToolContext) resolveSearxURL() string {
+	// 1. Check ToolContext field
+	if ctx.SearxURL != "" {
+		return ctx.SearxURL
+	}
+	// 2. Check settings_kv
+	if ctx.DB != nil {
+		var v string
+		if err := ctx.DB.QueryRow("SELECT value FROM settings_kv WHERE key='search_provider_url'").Scan(&v); err == nil && v != "" {
+			return v
+		}
+	}
+	// 3. Env var
+	if v := os.Getenv("SEARCH_PROVIDER_URL"); v != "" {
+		return v
+	}
+	return defaultSearxURL
+}
+
+func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
+	if query == "" {
+		return "", fmt.Errorf("query required")
+	}
+	base := strings.TrimRight(ctx.resolveSearxURL(), "/")
+	u := fmt.Sprintf("%s/search?q=%s&format=json", base, url.QueryEscape(query))
+	if categories != "" {
+		u += "&categories=" + url.QueryEscape(categories)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return "", fmt.Errorf("search: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
+		return "", fmt.Errorf("search %d: %s", resp.StatusCode, string(body))
+	}
+	var data struct {
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Content string `json:"content"`
+			ImgSrc  string `json:"img_src"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 50000)).Decode(&data); err != nil {
+		return "", fmt.Errorf("search parse: %v", err)
+	}
+	if len(data.Results) == 0 {
+		return "No results found.", nil
+	}
+	var b strings.Builder
+	limit := 10
+	if categories == "images" {
+		limit = 20
+	}
+	if len(data.Results) < limit {
+		limit = len(data.Results)
+	}
+	for _, r := range data.Results[:limit] {
+		if categories == "images" {
+			fmt.Fprintf(&b, "- %s\n  ![%s](%s)\n", r.Title, r.Title, r.ImgSrc)
+		} else {
+			fmt.Fprintf(&b, "- %s\n  %s\n  %s\n", r.Title, r.URL, r.Content)
+		}
+	}
+	return b.String(), nil
 }
 
 var reTag = regexp.MustCompile(`<[^>]+>`)

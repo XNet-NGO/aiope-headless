@@ -26,5 +26,6 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.Exec(`INSERT OR IGNORE INTO settings_kv(key,value) VALUES('agent_tools_tool_guidance','You have access to tools. Use them whenever you need to search, read files, run commands, or perform actions. Do NOT describe what you would do — actually call the tools. Never fabricate tool output.')`)
+	db.Exec(`INSERT OR IGNORE INTO settings_kv(key,value) VALUES('search_provider_url','https://search.xnet.ngo')`)
 	return db, nil
 }
