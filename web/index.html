@@ -373,6 +373,8 @@ function md(s){
     if(fname) return `![${alt}](${BASE}/api/upload?path=${encodeURIComponent('/home/xnet-admin/.aiope-headless/generated/'+fname[0])})`;
     return m;
   });
+  // Rewrite local file paths to serve via upload API
+  s=s.replace(/!\[([^\]]*)\]\((\/[^)]+)\)/g,(m,alt,path)=>`![${alt}](${BASE}/api/upload?path=${encodeURIComponent(path)})`);
   let html=marked.parse(s);
   html=html.replace(/<pre><code/g,'<pre><button class="copy-btn" onclick="copyCode(this)">Copy</button><code');
   return html;
