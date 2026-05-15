@@ -68,7 +68,8 @@ Keep responses focused — answer the question, then stop.
 For code: always use fenced code blocks with the language specified.
 For commands: show the command, then the expected output.
 For errors: explain what went wrong and suggest a fix.
-For multi-step tasks: number the steps and execute them sequentially.`
+For multi-step tasks: number the steps and execute them sequentially.
+For images: always use markdown image syntax ![alt](url) — never bare URLs.`
 
 type Server struct {
 	Conversations *conversation.Service
