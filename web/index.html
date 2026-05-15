@@ -1209,20 +1209,29 @@ if(window.visualViewport){
 async function init(){
   S.convs=await api.get('/api/conversations')||[];
   connectWS();
-  // Always have one empty conv on top — reuse or create
+  // Clean up extra empty convs (keep at most 1)
+  let foundEmpty=false;
+  for(let i=0;i<S.convs.length;i++){
+    if(S.convs[i].title==='New Chat'){
+      if(foundEmpty){api.del('/api/conversations/'+S.convs[i].id);S.convs.splice(i,1);i--}
+      else foundEmpty=true;
+    }
+  }
   if(S.convs.length>0){
     const top=S.convs[0];
     const data=await api.get('/api/conversations/'+top.id);
     if(!data.messages||data.messages.length===0){
-      S.active=top.id;
-      document.getElementById('chatTitle').textContent='AIOPE';
+      S.active=top.id;S.msgs=[];
     }else{
-      await newChat();
+      S.active=top.id;S.msgs=data.messages||[];
+      document.getElementById('chatTitle').textContent=top.title||'AIOPE';
     }
   }else{
-    await newChat();
+    const r=await api.post('/api/conversations',{title:'New Chat'});
+    const c=await r.json();
+    S.convs.unshift(c);S.active=c.id;S.msgs=[];
   }
-  renderSidebar();
+  renderSidebar();renderMessages();
   loadModelLabel();
   document.getElementById('input').focus();
 }
