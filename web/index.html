@@ -322,7 +322,8 @@ function connectWS(){
           if(m.finishReason==='cancelled'&&S.streamContent.trim()&&!S.msgs.find(x=>x.id===S.streamId)){
             S.msgs.push({id:S.streamId||'partial',role:'assistant',content:S.streamContent,imagePaths:[]})
           }
-          S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()
+          S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn();
+          document.getElementById('messages').scrollTop=document.getElementById('messages').scrollHeight;
         }
         break;
       case 'stream.error':
