@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -458,15 +459,16 @@ func convertImageToJPEG(data []byte, mime string) ([]byte, error) {
 	case "image/png":
 		img, err = png.Decode(r)
 	default:
-		img, err = jpeg.Decode(r)
+		// image.Decode handles progressive JPEG and other registered formats
+		img, _, err = image.Decode(r)
 	}
 	if err != nil {
 		return nil, err
 	}
-	// Resize if larger than 2048px on any side
+	// Resize to max 1024px for vision API context limits
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
-	maxDim := 2048
+	maxDim := 1024
 	if w > maxDim || h > maxDim {
 		scale := float64(maxDim) / float64(w)
 		if h > w {
@@ -478,7 +480,7 @@ func convertImageToJPEG(data []byte, mime string) ([]byte, error) {
 		img = dst
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -528,13 +530,11 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 		}
 	}
 
-	// Convert webp or resize large images (>4MB) to JPEG
-	if mime == "image/webp" || len(imgData) > 4*1024*1024 {
-		converted, cerr := convertImageToJPEG(imgData, mime)
-		if cerr == nil {
-			imgData = converted
-			mime = "image/jpeg"
-		}
+	// Always process through converter for consistent size/format
+	converted, cerr := convertImageToJPEG(imgData, mime)
+	if cerr == nil {
+		imgData = converted
+		mime = "image/jpeg"
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(imgData)
