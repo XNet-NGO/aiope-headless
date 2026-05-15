@@ -1,11 +1,15 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,6 +19,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/image/draw"
+	"golang.org/x/image/webp"
 )
 
 var ParallelSafe = map[string]bool{
@@ -441,6 +448,42 @@ func ExecuteTool(name string, args map[string]any, ctx *ToolContext) (string, er
 	}
 }
 
+func convertImageToJPEG(data []byte, mime string) ([]byte, error) {
+	var img image.Image
+	var err error
+	r := bytes.NewReader(data)
+	switch mime {
+	case "image/webp":
+		img, err = webp.Decode(r)
+	case "image/png":
+		img, err = png.Decode(r)
+	default:
+		img, err = jpeg.Decode(r)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Resize if larger than 2048px on any side
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	maxDim := 2048
+	if w > maxDim || h > maxDim {
+		scale := float64(maxDim) / float64(w)
+		if h > w {
+			scale = float64(maxDim) / float64(h)
+		}
+		nw, nh := int(float64(w)*scale), int(float64(h)*scale)
+		dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		draw.BiLinear.Scale(dst, dst.Bounds(), img, bounds, draw.Over, nil)
+		img = dst
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 	if imgURL == "" {
 		return "", fmt.Errorf("url required")
@@ -484,6 +527,16 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 			mime = "image/webp"
 		}
 	}
+
+	// Convert webp or resize large images (>4MB) to JPEG
+	if mime == "image/webp" || len(imgData) > 4*1024*1024 {
+		converted, cerr := convertImageToJPEG(imgData, mime)
+		if cerr == nil {
+			imgData = converted
+			mime = "image/jpeg"
+		}
+	}
+
 	b64 := base64.StdEncoding.EncodeToString(imgData)
 
 	// Resolve vision model
