@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /aiope-headless .
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git python3 build-essential openssh-client jq librsvg2-bin \
+    ca-certificates curl git python3 build-essential openssh-client jq librsvg2-bin poppler-utils antiword \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash -u 1001 aiope
 COPY --from=build /aiope-headless /usr/local/bin/aiope-headless

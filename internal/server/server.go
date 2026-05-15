@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -497,15 +498,30 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		switch msg.Type {
 		case "chat.send":
-			// Save inline base64 images to disk, convert to paths
+			// Save inline base64 images/docs to disk
+			var docContents []string
 			for _, img := range msg.ImageData {
 				if b, err := base64.StdEncoding.DecodeString(img.Data); err == nil {
 					dir := filepath.Join(os.Getenv("HOME"), ".aiope-headless", "uploads")
 					os.MkdirAll(dir, 0755)
 					dst := filepath.Join(dir, fmt.Sprintf("%d_%s", time.Now().UnixMilli(), img.Name))
 					os.WriteFile(dst, b, 0644)
-					msg.ImagePaths = append(msg.ImagePaths, dst)
+					ext := strings.ToLower(filepath.Ext(img.Name))
+					if ext == ".txt" || ext == ".md" || ext == ".csv" || ext == ".json" || ext == ".xml" || ext == ".html" || ext == ".py" || ext == ".js" || ext == ".ts" || ext == ".go" || ext == ".rs" || ext == ".java" || ext == ".c" || ext == ".cpp" || ext == ".h" || ext == ".sh" || ext == ".yaml" || ext == ".yml" || ext == ".toml" {
+						docContents = append(docContents, fmt.Sprintf("[File: %s]\n```\n%s\n```", img.Name, string(b)))
+					} else if ext == ".pdf" || ext == ".doc" || ext == ".docx" {
+						if text := extractDocText(dst); text != "" {
+							docContents = append(docContents, fmt.Sprintf("[File: %s]\n```\n%s\n```", img.Name, text))
+						} else {
+							msg.ImagePaths = append(msg.ImagePaths, dst)
+						}
+					} else {
+						msg.ImagePaths = append(msg.ImagePaths, dst)
+					}
 				}
+			}
+			if len(docContents) > 0 {
+				msg.Content = msg.Content + "\n\n" + strings.Join(docContents, "\n\n")
 			}
 			go s.handleChatSend(ctx, client, msg.ConversationID, msg.Content, msg.Mode, msg.ImagePaths)
 		case "chat.retry":
@@ -550,6 +566,36 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func extractDocText(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".pdf":
+		out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case ".docx":
+		// Extract text from docx (zip of XML)
+		out, err := exec.Command("sh", "-c", fmt.Sprintf(`unzip -p %q word/document.xml | sed -e 's/<[^>]*>//g' -e 's/&amp;/\&/g' -e 's/&lt;/</g' -e 's/&gt;/>/g'`, path)).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case ".doc":
+		out, err := exec.Command("antiword", path).Output()
+		if err != nil {
+			// fallback: try catdoc
+			out, err = exec.Command("catdoc", path).Output()
+			if err != nil {
+				return ""
+			}
+		}
+		return strings.TrimSpace(string(out))
+	}
+	return ""
 }
 
 func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, content, mode string, imagePaths []string) {
