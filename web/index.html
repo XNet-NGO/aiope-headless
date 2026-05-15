@@ -273,10 +273,10 @@ let ws;
 
 const BASE=(()=>{const s=document.currentScript&&document.currentScript.src?new URL(document.currentScript.src).pathname:location.pathname;const m=s.match(/^(\/[^/]+)(?:\/|$)/);return m&&m[1]!=='/api'?m[1]:''})();
 const api={
-  async get(u){const r=await fetch(BASE+u);if(r.status===401){location.href=BASE+'/login';return{}}return r.json()},
-  async post(u,b){const r=await fetch(BASE+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href=BASE+'/login'}return r},
-  async put(u,b){const r=await fetch(BASE+u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){location.href=BASE+'/login'}return r},
-  async del(u){const r=await fetch(BASE+u,{method:'DELETE'});if(r.status===401){location.href=BASE+'/login'}return r},
+  async get(u){const r=await fetch(BASE+u);if(r.status===401){if(!S.streaming)location.href=BASE+'/login';return null}return r.json()},
+  async post(u,b){const r=await fetch(BASE+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){if(!S.streaming)location.href=BASE+'/login'}return r},
+  async put(u,b){const r=await fetch(BASE+u,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.status===401){if(!S.streaming)location.href=BASE+'/login'}return r},
+  async del(u){const r=await fetch(BASE+u,{method:'DELETE'});if(r.status===401){if(!S.streaming)location.href=BASE+'/login'}return r},
   async patch(u,b){return fetch(BASE+u,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})}
 };
 
@@ -529,6 +529,7 @@ async function newChat(){
 async function selectConv(id){
   S.active=id;
   const data=await api.get('/api/conversations/'+id);
+  if(!data)return;
   S.msgs=data.messages||[];
   document.getElementById('chatTitle').textContent=data.conversation.title;
   renderMessages();renderSidebar();
@@ -1128,7 +1129,7 @@ function renderExportSettings(){
       <div>
         <h4 style="margin:0 0 8px;font-size:14px">Export Settings</h4>
         <p style="color:var(--text-secondary);font-size:13px;margin:0 0 8px">Download all settings, providers, memories, and tool toggles.</p>
-        <button class="btn-primary" onclick="window.location.href='/api/settings/export'">Export</button>
+        <button class="btn-primary" onclick="window.location.href=BASE+'/api/settings/export'">Export</button>
       </div>
       <div style="border-top:1px solid var(--outline);padding-top:16px">
         <h4 style="margin:0 0 8px;font-size:14px">Import Settings</h4>
@@ -1228,7 +1229,7 @@ async function init(){
   if(S.convs.length>0){
     const top=S.convs[0];
     const data=await api.get('/api/conversations/'+top.id);
-    if(!data.messages||data.messages.length===0){
+    if(!data||!data.messages||data.messages.length===0){
       S.active=top.id;S.msgs=[];
     }else{
       S.active=top.id;S.msgs=data.messages||[];
