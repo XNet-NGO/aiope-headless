@@ -611,10 +611,11 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 	}
 	var data struct {
 		Results []struct {
-			Title   string `json:"title"`
-			URL     string `json:"url"`
-			Content string `json:"content"`
-			ImgSrc  string `json:"img_src"`
+			Title        string `json:"title"`
+			URL          string `json:"url"`
+			Content      string `json:"content"`
+			ImgSrc       string `json:"img_src"`
+			ThumbnailSrc string `json:"thumbnail_src"`
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 50000)).Decode(&data); err != nil {
@@ -633,7 +634,13 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 	}
 	for _, r := range data.Results[:limit] {
 		if categories == "images" {
-			fmt.Fprintf(&b, "- %s\n  ![%s](%s)\n", r.Title, r.Title, r.ImgSrc)
+			img := r.ImgSrc
+			if img == "" {
+				img = r.ThumbnailSrc
+			}
+			if img != "" {
+				fmt.Fprintf(&b, "- %s\n  %s\n  %s\n", r.Title, img, r.URL)
+			}
 		} else {
 			fmt.Fprintf(&b, "- %s\n  %s\n  %s\n", r.Title, r.URL, r.Content)
 		}
