@@ -21,7 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/image/bmp"
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/tiff"
 	"golang.org/x/image/webp"
 )
 
@@ -458,8 +460,10 @@ func convertImageToJPEG(data []byte, mime string) ([]byte, error) {
 		img, err = webp.Decode(r)
 	case "image/png":
 		img, err = png.Decode(r)
+	case "image/bmp":
+		img, err = bmp.Decode(r)
 	default:
-		// image.Decode handles progressive JPEG and other registered formats
+		// image.Decode handles JPEG (incl progressive), GIF, TIFF via registered decoders
 		img, _, err = image.Decode(r)
 	}
 	if err != nil {
@@ -527,6 +531,10 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 			mime = "image/gif"
 		} else if len(imgData) > 12 && string(imgData[8:12]) == "WEBP" {
 			mime = "image/webp"
+		} else if imgData[0] == 'B' && imgData[1] == 'M' {
+			mime = "image/bmp"
+		} else if (imgData[0] == 'I' && imgData[1] == 'I') || (imgData[0] == 'M' && imgData[1] == 'M') {
+			mime = "image/tiff"
 		}
 	}
 
