@@ -547,7 +547,25 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 			mime = "image/bmp"
 		} else if (imgData[0] == 'I' && imgData[1] == 'I') || (imgData[0] == 'M' && imgData[1] == 'M') {
 			mime = "image/tiff"
+		} else if imgData[0] == '<' || (imgData[0] == 0xEF && imgData[1] == 0xBB) {
+			mime = "image/svg+xml"
 		}
+	}
+	if strings.HasSuffix(strings.ToLower(imgURL), ".svg") {
+		mime = "image/svg+xml"
+	}
+
+	// Rasterize SVG via rsvg-convert
+	if mime == "image/svg+xml" {
+		cmd := exec.Command("rsvg-convert", "-w", "1024", "--format=png")
+		cmd.Stdin = bytes.NewReader(imgData)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("svg rasterize: %v", err)
+		}
+		imgData = out.Bytes()
+		mime = "image/png"
 	}
 
 	// Always process through converter for consistent size/format
