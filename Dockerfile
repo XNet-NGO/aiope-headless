@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /aiope-headless /usr/local/bin/aiope-headless
 ENV AIOPE_DB_PATH=/data/aiope2-chat.db
 ENV HOME=/data
-RUN mkdir -p /data && chown aiope:aiope /data && rm -rf /tmp && ln -s /data/tmp /tmp
+RUN mkdir -p /data && chown aiope:aiope /data && rm -rf /tmp && ln -s /data/tmp /tmp && chown aiope:aiope /root && chmod 777 /root
 VOLUME /data
 EXPOSE 8090
 USER aiope
