@@ -520,6 +520,9 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 			return "", fmt.Errorf("fetch image: %v", err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("fetch image: HTTP %d from %s", resp.StatusCode, imgURL)
+		}
 		imgData, err = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		if err != nil {
 			return "", fmt.Errorf("read image: %v", err)
