@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -551,6 +552,11 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 	if cerr == nil {
 		imgData = converted
 		mime = "image/jpeg"
+	} else if mime != "image/jpeg" && mime != "image/png" {
+		log.Printf("image convert failed: mime=%s len=%d err=%v first4=%x", mime, len(imgData), cerr, imgData[:min(4, len(imgData))])
+		return "", fmt.Errorf("failed to convert %s: %v", mime, cerr)
+	} else {
+		log.Printf("image convert failed (passthrough): mime=%s len=%d err=%v", mime, len(imgData), cerr)
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(imgData)
