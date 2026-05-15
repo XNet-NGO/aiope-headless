@@ -454,7 +454,10 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 	var err error
 	if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
 		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Get(imgURL)
+		req, _ := http.NewRequest("GET", imgURL, nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		req.Header.Set("Accept", "image/*")
+		resp, err := client.Do(req)
 		if err != nil {
 			return "", fmt.Errorf("fetch image: %v", err)
 		}
@@ -467,6 +470,18 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 		imgData, err = os.ReadFile(imgURL)
 		if err != nil {
 			return "", fmt.Errorf("read file: %v", err)
+		}
+	}
+
+	// Detect MIME type from magic bytes
+	mime := "image/jpeg"
+	if len(imgData) > 4 {
+		if imgData[0] == 0x89 && imgData[1] == 'P' && imgData[2] == 'N' && imgData[3] == 'G' {
+			mime = "image/png"
+		} else if imgData[0] == 'G' && imgData[1] == 'I' && imgData[2] == 'F' {
+			mime = "image/gif"
+		} else if len(imgData) > 12 && string(imgData[8:12]) == "WEBP" {
+			mime = "image/webp"
 		}
 	}
 	b64 := base64.StdEncoding.EncodeToString(imgData)
@@ -483,7 +498,7 @@ func analyzeImage(ctx *ToolContext, imgURL, question string) (string, error) {
 		Role: "user",
 		Content: []any{
 			map[string]any{"type": "text", "text": question},
-			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + b64}},
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:" + mime + ";base64," + b64}},
 		},
 	}}
 
