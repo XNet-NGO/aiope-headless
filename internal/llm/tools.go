@@ -600,7 +600,10 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 		u += "&categories=" + url.QueryEscape(categories)
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(u)
+	req, _ := http.NewRequest("GET", u, nil)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "aiope-headless/1.0")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("search: %v", err)
 	}
