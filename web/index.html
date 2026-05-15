@@ -318,7 +318,12 @@ function connectWS(){
         if(m.conversationId===S.active){const t=S.streamTools.find(x=>x.id===m.toolCallId);if(t){t.status=m.isError?'error':'done';t.result=m.result||''}renderStreamDelta(true)}
         break;
       case 'stream.end':
-        if(m.conversationId===S.active){S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()}
+        if(m.conversationId===S.active){
+          if(m.finishReason==='cancelled'&&S.streamContent.trim()&&!S.msgs.find(x=>x.id===S.streamId)){
+            S.msgs.push({id:S.streamId||'partial',role:'assistant',content:S.streamContent,imagePaths:[]})
+          }
+          S.streaming=false;S.streamId=null;S.streamContent='';S.streamReasoning='';S.streamTools=[];renderMessages();updateSendBtn()
+        }
         break;
       case 'stream.error':
         if(m.conversationId===S.active){S.streaming=false;S.streamId=null;appendError(m.error);updateSendBtn()}
