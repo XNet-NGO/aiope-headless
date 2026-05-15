@@ -621,7 +621,8 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 			ThumbnailSrc string `json:"thumbnail_src"`
 		} `json:"results"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 50000)).Decode(&data); err != nil {
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &data); err != nil {
 		return "", fmt.Errorf("search parse: %v", err)
 	}
 	if len(data.Results) == 0 {
