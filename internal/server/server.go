@@ -668,7 +668,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		if m.Role == "system" {
 			continue
 		}
-		cm := llm.ChatMessage{Role: m.Role, Content: m.Content}
+		cm := llm.ChatMessage{Role: m.Role, Content: m.Content, Reasoning: m.Reasoning}
 		if len(m.ImagePaths) > 0 {
 			if supportsVision {
 				parts := []any{map[string]any{"type": "text", "text": m.Content}}
@@ -775,7 +775,7 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		},
 	}
 
-	fullContent, err := orch.Run(chatMsgs)
+	fullContent, reasoning, err := orch.Run(chatMsgs)
 	if err != nil {
 		if streamCtx.Err() != nil {
 			// Already sent stream.end from cancel handler
@@ -785,14 +785,14 @@ func (s *Server) handleChatSend(ctx context.Context, client *ws.Client, convID, 
 		}
 		// Save partial content if any
 		if fullContent != "" {
-			s.Messages.Add(convID, "assistant", fullContent)
+			s.Messages.AddWithReasoning(convID, "assistant", fullContent, reasoning)
 		}
 		return
 	}
 
 	// Save assistant message
 	if fullContent != "" {
-		aMsg, _ := s.Messages.Add(convID, "assistant", fullContent)
+		aMsg, _ := s.Messages.AddWithReasoning(convID, "assistant", fullContent, reasoning)
 		if aMsg != nil {
 			s.Hub.BroadcastJSON(map[string]any{"type": "message.created", "message": aMsg})
 		}
@@ -1590,7 +1590,7 @@ func (s *Server) streamToConv(convID, assistantID, mode string, chatMsgs []llm.C
 			}
 		},
 	}
-	content, err := orch.Run(chatMsgs)
+	content, _, err := orch.Run(chatMsgs)
 	return content, err
 }
 

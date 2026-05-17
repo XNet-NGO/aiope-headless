@@ -670,7 +670,7 @@ func executeTask(ctx *ToolContext, description, prompt string) (string, error) {
 		},
 	}
 
-	result, err := orch.Run(msgs)
+	result, _, err := orch.Run(msgs)
 	if err != nil {
 		return fmt.Sprintf("<task_error>%s</task_error>", err.Error()), nil
 	}

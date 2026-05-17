@@ -17,6 +17,7 @@ type ChatMessage struct {
 	Content    any    `json:"content"`
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ToolCalls  []any  `json:"tool_calls,omitempty"`
+	Reasoning  string `json:"reasoning_content,omitempty"`
 }
 
 type ToolCallInfo struct {

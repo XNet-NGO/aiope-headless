@@ -18,7 +18,7 @@ type Orchestrator struct {
 	Ctx      context.Context
 }
 
-func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
+func (o *Orchestrator) Run(messages []ChatMessage) (string, string, error) {
 	raw := make([]ChatMessage, len(messages))
 	copy(raw, messages)
 
@@ -36,13 +36,14 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		select {
 		case <-ctx.Done():
 			o.OnEvent(StreamEvent{Done: true, FinishReason: "cancelled"})
-			return fullContent.String(), nil
+			return fullContent.String(), fullReasoning.String(), nil
 		default:
 		}
 		// Trim older tool results (keep last 3 full, truncate older to 500 chars)
 		trimToolResults(raw)
 
 		var roundContent strings.Builder
+		var roundReasoning strings.Builder
 		var toolCalls []ToolCallInfo
 		var streamErr error
 
@@ -53,6 +54,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 				o.OnEvent(StreamEvent{Delta: ev.Delta})
 			}
 			if ev.Reasoning != "" {
+				roundReasoning.WriteString(ev.Reasoning)
 				fullReasoning.WriteString(ev.Reasoning)
 				o.OnEvent(StreamEvent{Reasoning: ev.Reasoning})
 			}
@@ -69,15 +71,15 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 		})
 
 		if err != nil {
-			return fullContent.String(), err
+			return fullContent.String(), fullReasoning.String(), err
 		}
 		if streamErr != nil {
-			return fullContent.String(), streamErr
+			return fullContent.String(), fullReasoning.String(), streamErr
 		}
 
 		// No tool calls — done
 		if len(toolCalls) == 0 {
-			return fullContent.String(), nil
+			return fullContent.String(), fullReasoning.String(), nil
 		}
 
 		// Emit tool calls to client
@@ -95,7 +97,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 				},
 			}
 		}
-		raw = append(raw, ChatMessage{Role: "assistant", ToolCalls: tcJSON})
+		raw = append(raw, ChatMessage{Role: "assistant", ToolCalls: tcJSON, Reasoning: roundReasoning.String()})
 
 		// Detect tool call loops (same tool+args 3x in a row = bail)
 		toolKey := fmt.Sprintf("%s:%s", toolCalls[0].Name, toolCalls[0].RawArgs)
@@ -104,7 +106,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 			if sameToolCount >= 3 {
 				log.Printf("orchestrator: breaking loop on %s after %d repeats", toolCalls[0].Name, sameToolCount)
 				o.OnEvent(StreamEvent{Done: true, FinishReason: "tool_loop"})
-				return fullContent.String(), nil
+				return fullContent.String(), fullReasoning.String(), nil
 			}
 		} else {
 			lastToolKey = toolKey
@@ -118,7 +120,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 
 		// Bail if cancelled during tool execution
 		if ctx.Err() != nil {
-			return fullContent.String(), nil
+			return fullContent.String(), fullReasoning.String(), nil
 		}
 
 		// Log results
@@ -152,7 +154,7 @@ func (o *Orchestrator) Run(messages []ChatMessage) (string, error) {
 	}
 
 	o.OnEvent(StreamEvent{Done: true, FinishReason: "max_rounds"})
-	return fullContent.String(), nil
+	return fullContent.String(), fullReasoning.String(), nil
 }
 
 func executeCalls(calls []ToolCallInfo, ctx *ToolContext, onResult func(ToolResultInfo)) []ToolResultInfo {
@@ -281,11 +283,13 @@ func EstimateTokens(s string) int {
 func (m ChatMessage) MarshalJSON() ([]byte, error) {
 	type Alias ChatMessage
 	if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.Content == nil {
-		return json.Marshal(struct {
+		s := struct {
 			Role      string `json:"role"`
 			Content   string `json:"content"`
 			ToolCalls []any  `json:"tool_calls"`
-		}{m.Role, "", m.ToolCalls})
+			Reasoning string `json:"reasoning_content,omitempty"`
+		}{m.Role, "", m.ToolCalls, m.Reasoning}
+		return json.Marshal(s)
 	}
 	return json.Marshal(struct{ Alias }{Alias(m)})
 }
