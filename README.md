@@ -1,5 +1,7 @@
 # AIOPE Headless
 
+[![Built with Pollinations.ai](https://img.shields.io/badge/Built_with-Pollinations.ai-blue)](https://pollinations.ai)
+
 A headless AI assistant with a web UI, built for the [XNet](https://xnet.ngo) ZeroTier network. Go backend, vanilla JS frontend (single `index.html`), SQLite persistence, WebSocket streaming.
 
 Part of the AIOPE ecosystem — the desktop/server counterpart to the [aiope2](https://github.com/XNet-NGO/aiope2) Android app.
@@ -200,6 +202,10 @@ Connect to `/ws`. Messages are JSON with a `type` field.
 | `stream.end` | Streaming complete |
 | `conversation.created` | New conversation |
 | `file.uploaded` | Chunk upload complete (id, path) |
+
+## Powered By
+
+- [Pollinations.ai](https://pollinations.ai) — Open-source generative AI platform
 
 ## License
 
