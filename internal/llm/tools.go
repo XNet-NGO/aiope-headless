@@ -716,14 +716,13 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("User-Agent", "aiope-headless/1.0")
 	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("search: %v", err)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return ddgSearch(query, categories)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
-		return "", fmt.Errorf("search %d: %s", resp.StatusCode, string(body))
-	}
 	var data struct {
 		Results []struct {
 			Title        string `json:"title"`
@@ -764,6 +763,44 @@ func searxQuery(ctx *ToolContext, query, categories string) (string, error) {
 		} else {
 			fmt.Fprintf(&b, "- %s\n  %s\n  %s\n", r.Title, r.URL, r.Content)
 		}
+	}
+	return b.String(), nil
+}
+
+var reDDGResult = regexp.MustCompile(`<a rel="nofollow" class="result__a" href="[^"]*uddg=([^&"]+)[^"]*">(.+?)</a>`)
+var reDDGSnippet = regexp.MustCompile(`<a class="result__snippet"[^>]*>(.+?)</a>`)
+
+func ddgSearch(query, categories string) (string, error) {
+	u := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
+	if categories == "images" {
+		u += "&iax=images&ia=images"
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, _ := http.NewRequest("GET", u, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ddg: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	html := string(body)
+
+	links := reDDGResult.FindAllStringSubmatch(html, 10)
+	snippets := reDDGSnippet.FindAllStringSubmatch(html, 10)
+
+	if len(links) == 0 {
+		return "No results found.", nil
+	}
+	var b strings.Builder
+	for i, m := range links {
+		link, _ := url.QueryUnescape(m[1])
+		title := reTag.ReplaceAllString(m[2], "")
+		snippet := ""
+		if i < len(snippets) {
+			snippet = reTag.ReplaceAllString(snippets[i][1], "")
+		}
+		fmt.Fprintf(&b, "- %s\n  %s\n  %s\n", title, link, snippet)
 	}
 	return b.String(), nil
 }
